@@ -1,7 +1,7 @@
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const play = require('play-dl');
 
-// Helper function to play songs sequentially
+// Helper function to play songs sequentially in order
 async function playSong(client, guildId, song) {
     const serverQueue = client.musicQueues.get(guildId);
     if (!serverQueue || !song) return;
@@ -9,7 +9,7 @@ async function playSong(client, guildId, song) {
     try {
         let streamSource = song.url;
         
-        // Handle Spotify link search resolution
+        // Handle Spotify link resolution
         if (play.is_spotify(song.url)) {
             const spotifyData = await play.spotify(song.url);
             const searched = await play.search(`${spotifyData.name} ${spotifyData.artists[0]?.name || ''}`, { limit: 1 });
