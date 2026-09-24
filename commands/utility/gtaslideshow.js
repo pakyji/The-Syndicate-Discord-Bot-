@@ -1,24 +1,19 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 
 const vehicles = [
-    { name: 'Pegassi Zentorno', price: '$725,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Zentorno-GTAV.png' },
-    { name: 'Progen T20', price: '$2,200,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/T20-GTAV.png' },
-    { name: 'Grotti Itali GTO', price: '$1,965,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/ItaliGTO-GTAV.png' },
-    { name: 'Ocelot Pariah', price: '$1,420,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Pariah-GTAV.png' },
-    { name: 'Pegassi Ignus', price: '$2,765,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Ignus-GTAV.png' },
-    { name: 'Pfister Neon', price: '$1,500,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Neon-GTAV.png' },
-    { name: 'Benefactor Krieger', price: '$2,875,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Krieger-GTAV.png' },
-    { name: 'Annis RE-7B', price: '$2,475,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/RE7B-GTAV.png' },
-    { name: 'Grotti X80 Proto', price: '$2,700,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/X80Proto-GTAV.png' },
-    { name: 'Pegassi Osiris', price: '$1,950,000', image: 'https://static.wikia.nocookie.net/gtawiki/images/images/images/Osiris-GTAV.png' }
+    { name: 'Pegassi Zentorno', price: '$725,000', image: 'https://images.unsplash.com/photo-1542282088-72c9c27ed0cd?w=800' },
+    { name: 'Progen T20', price: '$2,200,000', image: 'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800' },
+    { name: 'Grotti Itali GTO', price: '$1,965,000', image: 'https://images.unsplash.com/photo-1555215695-3004980ad54e?w=800' },
+    { name: 'Ocelot Pariah', price: '$1,420,000', image: 'https://images.unsplash.com/photo-1617814076367-b759c7d7e738?w=800' },
+    { name: 'Benefactor Krieger', price: '$2,875,000', image: 'https://images.unsplash.com/photo-1525609004556-c46c7d6cf023?w=800' }
 ];
 
 module.exports = {
     name: 'gta-slideshow',
-    description: 'Slideshow of GTA vehicles with price updating every 5 seconds',
+    description: 'Shows vehicle price and image, updating in the same message every 5 seconds',
     default_member_permissions: PermissionFlagsBits.Administrator,
     async execute(interaction) {
-        await interaction.reply({ content: '🚗 Starting GTA vehicle showcase slideshow...', ephemeral: true });
+        await interaction.reply({ content: '🚗 Starting GTA vehicle & price slideshow with images...', ephemeral: true });
 
         let index = 0;
 
