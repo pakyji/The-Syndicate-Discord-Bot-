@@ -1,6 +1,16 @@
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, demuxProbe } = require('@discordjs/voice');
 const play = require('play-dl');
 
+// OPTIONAL: If you want to bypass YouTube's "Sign in" block, export your cookies from a browser 
+// using a browser extension (like "Get cookies.txt LOCALLY") and paste the contents into your .env file as YOUTUBE_COOKIE="your_cookie_string"
+if (process.env.YOUTUBE_COOKIE) {
+    play.setToken({
+        youtube: {
+            cookie: process.env.YOUTUBE_COOKIE
+        }
+    });
+}
+
 async function playSong(client, guildId, song) {
     const serverQueue = client.musicQueues.get(guildId);
     if (!serverQueue || !song) return;
@@ -9,18 +19,11 @@ async function playSong(client, guildId, song) {
         let streamSource = song.url;
         
         if (!song.url.startsWith('http')) {
-            try {
-                const searched = await play.search(song.url, { limit: 1 });
-                if (searched && searched.length > 0) {
-                    streamSource = searched[0].url;
-                } else {
-                    serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
-                    serverQueue.songs.shift();
-                    return playSong(client, guildId, serverQueue.songs[0]);
-                }
-            } catch (searchError) {
-                console.error('Search error:', searchError);
-                serverQueue.textChannel.send('❌ YouTube search failed due to an API change. Please try using a direct YouTube URL instead.').catch(() => {});
+            const searched = await play.search(song.url, { limit: 1 });
+            if (searched && searched.length > 0) {
+                streamSource = searched[0].url;
+            } else {
+                serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
                 serverQueue.songs.shift();
                 return playSong(client, guildId, serverQueue.songs[0]);
             }
@@ -40,7 +43,7 @@ async function playSong(client, guildId, song) {
         serverQueue.textChannel.send(`🎶 Now playing: **${song.title}**`).catch(() => {});
     } catch (error) {
         console.error('Playback stream error:', error);
-        serverQueue.textChannel.send(`❌ Error: ${error.message}`).catch(() => {});
+        serverQueue.textChannel.send(`❌ Error: YouTube blocked the request. Try adding your YouTube cookie to your .env file.`).catch(() => {});
         serverQueue.songs.shift();
         playSong(client, guildId, serverQueue.songs[0]);
     }
