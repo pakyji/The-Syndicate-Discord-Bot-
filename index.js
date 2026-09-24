@@ -126,18 +126,18 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Message event handling (Auto-Translate, Anti-Link, and Text Prefix Commands)
+// Message event handling (Simplified Translation, Anti-Link, and Text Prefix Commands)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Translation Logic
+    // Simplified Translation Logic
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
             const result = await translate(message.content, { to: 'en' });
             const translatedText = Array.isArray(result) ? result[0] : result;
 
             if (translatedText && translatedText.toLowerCase() !== message.content.toLowerCase()) {
-                await message.channel.send(`🌐 **Translation (${message.author.username}):** ${translatedText}`);
+                await message.channel.send(`💬 **${message.author.username}:** ${translatedText}`);
             }
         } catch (error) {
             console.error('Translation error:', error);
@@ -196,7 +196,7 @@ client.on('interactionCreate', async interaction => {
 
             const idInput = new TextInputBuilder()
                 .setCustomId('gamertag_input')
-                .setLabel('Gamertag ID=')
+                .setLabel('Gamertag ID')
                 .setStyle(TextInputStyle.Short)
                 .setPlaceholder('Type your ID here...')
                 .setRequired(true);
@@ -251,7 +251,7 @@ client.on('interactionCreate', async interaction => {
 
     } catch (error) {
         console.error('Interaction error:', error);
-        const errorReply = { content: 'Si è verificato un errore.', ephemeral: true };
+        const errorReply = { content: 'An error occurred.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp(errorReply).catch(() => {});
         } else {
