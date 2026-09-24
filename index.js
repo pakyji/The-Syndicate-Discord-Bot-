@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const translate = require('@vitalets/google-translate-api');
 require('dotenv').config();
 
 const client = new Client({
@@ -13,6 +14,9 @@ const client = new Client({
 
 client.commands = new Collection();
 const commandsArray = [];
+
+// Designated translation channel ID
+const TRANSLATION_CHANNEL_ID = '1538595475794563167';
 
 // Load command files dynamically
 const commandsPath = path.join(__dirname, 'commands');
@@ -49,12 +53,26 @@ client.once('ready', async () => {
     }
 });
 
-// Anti-link security check with DM warning
+// Message event handling (Auto-Translate, Anti-Link, and Text Prefix Commands)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
+    // 1. Auto-Translate feature for the specified channel
+    if (message.channel.id === TRANSLATION_CHANNEL_ID) {
+        try {
+            const res = await translate(message.content, { to: 'en' });
+            // If the translated text is different from the original message, post the translation
+            if (res.text.toLowerCase() !== message.content.toLowerCase()) {
+                await message.channel.send(`🌐 **Translation (${message.author.username}):** ${res.text}`);
+            }
+        } catch (error) {
+            console.error('Translation error:', error);
+        }
+        return; // Skip anti-link and prefix checks inside the translation channel
+    }
 
+    // 2. Anti-link security check with DM warning
+    const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
     if (linkRegex.test(message.content)) {
         try {
             await message.delete();
@@ -65,7 +83,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Handle text prefix commands (!command) as a fallback
+    // 3. Handle text prefix commands (!command) as a fallback
     if (!message.content.startsWith('!')) return;
 
     const args = message.content.slice(1).trim().split(/ +/);
