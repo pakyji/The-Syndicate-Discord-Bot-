@@ -26,6 +26,9 @@ const PC_CHANNEL_ID = '1535658134230671370';
 const GIVEAWAY_CHANNEL_ID = '1546252181920022538';
 const VERIFIED_ROLE_NAME = 'Verified';
 
+// Memory map for automatic warnings tracking
+const autoWarnings = new Map();
+
 // Helper function to get or create the 'Verified' role
 async function getOrCreateVerifiedRole(guild) {
     let role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
@@ -43,7 +46,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Recursive function to load commands from subfolders
+// Recursive function to load commands from subfolders (Dynamic Command Handler)
 const loadCommands = (dir) => {
     const files = fs.readdirSync(dir);
     for (const file of files) {
@@ -121,10 +124,11 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Message event handling (Translation & Anti-Link Filter)
+// Message event handling (Translation & Automatic Moderation / Anti-Link / Auto-Warn Filter)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
+    // Translation Feature
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
             const encodedText = encodeURIComponent(message.content);
@@ -141,12 +145,40 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // Automatic Moderation Filter (Bad words & Links)
+    const badWords = ['parolaccia1', 'parolaccia2']; // Apni zaroorat ke mutabiq words add kar sakte hain
+    const contentLower = message.content.toLowerCase();
+    const hasBadWord = badWords.some(word => contentLower.includes(word));
+    
     const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
-    if (linkRegex.test(message.content)) {
+    const hasLink = linkRegex.test(message.content);
+
+    if (hasBadWord || hasLink) {
         try {
             await message.delete();
-            await message.author.send(`Hey! Links are not allowed in **${message.guild.name}**.`);
-        } catch (error) {}
+
+            const userId = message.author.id;
+            const currentWarns = (autoWarnings.get(userId) || 0) + 1;
+            autoWarnings.set(userId, currentWarns);
+
+            const warningMsg = await message.channel.send(
+                `⚠️ <@${userId}>, your message was deleted because it contained restricted content! (Auto-Warns: ${currentWarns}/3)`
+            );
+            
+            setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
+
+            // Auto-action: 3 warn hone par 10 minutes ka automatic timeout
+            if (currentWarns >= 3) {
+                const member = await message.guild.members.fetch(userId).catch(() => null);
+                if (member) {
+                    await member.timeout(10 * 60 * 1000, 'Accumulated 3 automatic warnings');
+                    await message.channel.send(`🚨 <@${userId}> has reached 3 auto-warns and has been put in **timeout** for 10 minutes!`);
+                    autoWarnings.set(userId, 0);
+                }
+            }
+        } catch (error) {
+            console.error('Auto-moderation error:', error);
+        }
         return;
     }
 });
