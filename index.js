@@ -9,7 +9,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildMembers, // Zaroori hai members join event aur role assign karne ke liye
     ],
 });
 
@@ -56,6 +56,28 @@ client.once('ready', async () => {
         console.log('Successfully reloaded application slash commands.');
     } catch (error) {
         console.error(error);
+    }
+});
+
+// New Member Join Handler (Both DM and Public Channel Guide)
+client.on('guildMemberAdd', async (member) => {
+    try {
+        const welcomeText = `Welcome to **${member.guild.name}**! Please head over to <#${GAMERTAG_INPUT_CHANNEL_ID}> to select your gaming platform and get verified.`;
+        
+        // 1. Send Direct Message (DM) to the user
+        await member.send(welcomeText).catch((err) => {
+            console.log(`Could not send DM to ${member.user.tag}:`, err.message);
+        });
+
+        // 2. Send Public Message in Verification Channel
+        const channel = member.guild.channels.cache.get(GAMERTAG_INPUT_CHANNEL_ID);
+        if (channel) {
+            const publicMsg = await channel.send(`Hey <@${member.id}>! ${welcomeText}`);
+            // Channel clean rakhne ke liye public message 2 minutes baad delete ho jayega
+            setTimeout(() => publicMsg.delete().catch(() => {}), 120000);
+        }
+    } catch (error) {
+        console.error('GuildMemberAdd error:', error);
     }
 });
 
@@ -131,7 +153,7 @@ client.on('interactionCreate', async interaction => {
 
         const idInput = new TextInputBuilder()
             .setCustomId('gamertag_input')
-            .setLabel('Gamertag ID=') // User ki requirement ke mutabiq label
+            .setLabel('Gamertag ID=')
             .setStyle(TextInputStyle.Short)
             .setPlaceholder('Type your ID here...')
             .setRequired(true);
