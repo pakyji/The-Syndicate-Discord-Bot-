@@ -27,12 +27,17 @@ const loadCommands = (dir) => {
             loadCommands(filePath);
         } else if (file.endsWith('.js')) {
             const command = require(filePath);
-            if ('name' in command && 'execute' in command) {
-                client.commands.set(command.name, command);
+            
+            // Support for both SlashCommandBuilder (.data) and direct .name
+            const commandData = command.data ? command.data.toJSON() : command;
+            const commandName = command.data ? command.data.name : command.name;
+
+            if (commandName && (command.execute || command.run)) {
+                client.commands.set(commandName, command);
                 commandsArray.push({
-                    name: command.name,
-                    description: command.description || 'No description provided',
-                    options: command.options || []
+                    name: commandName,
+                    description: commandData.description || 'No description provided',
+                    options: commandData.options || []
                 });
             }
         }
@@ -63,11 +68,24 @@ const loadEvents = (dir) => {
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 
-// Register Slash Commands Automatically on Startup
+// Register Slash Commands Automatically on Startup (Guild-specific using panel GUILD_ID or Global)
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        await rest.put(Routes.applicationCommands(client.user.id), { body: commandsArray });
+        if (process.env.GUILD_ID) {
+            await rest.put(
+                Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
+                { body: commandsArray },
+            );
+            console.log('✅ Commands successfully registered instantly in your guild using GUILD_ID from panel!');
+        } else {
+            await rest.put(
+                Routes.applicationCommands(client.user.id),
+                { body: commandsArray },
+            );
+            console.log('✅ Commands successfully registered globally!');
+        }
+
         console.log('✅ The Syndicate bot is online with Zero-Touch Modular Architecture!');
     } catch (error) {
         console.error('Command registration error:', error);
