@@ -126,11 +126,11 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Message event handling (Simplified Translation, Anti-Link, and Text Prefix Commands)
+// Message event handling (Translation with auto-delete original, Anti-Link, and Text Prefix Commands)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Simplified Translation Logic
+    // Translation Logic (Deletes original message and sends clean translation)
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
             const result = await translate(message.content, { to: 'en' });
@@ -138,6 +138,7 @@ client.on('messageCreate', async (message) => {
 
             if (translatedText && translatedText.toLowerCase() !== message.content.toLowerCase()) {
                 await message.channel.send(`💬 **${message.author.username}:** ${translatedText}`);
+                await message.delete().catch(() => {});
             }
         } catch (error) {
             console.error('Translation error:', error);
