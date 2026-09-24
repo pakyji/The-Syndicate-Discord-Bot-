@@ -8,22 +8,22 @@ async function playSong(client, guildId, song) {
     try {
         let streamSource = song.url;
         
-        if (play.is_spotify(song.url)) {
-            const spotifyData = await play.spotify(song.url);
-            const searched = await play.search(`${spotifyData.name} ${spotifyData.artists[0]?.name || ''}`, { limit: 1 });
-            if (searched && searched.length > 0) {
-                streamSource = searched[0].url;
-            } else {
-                serverQueue.textChannel.send('❌ Could not find a playable source for this Spotify track.').catch(() => {});
-                serverQueue.songs.shift();
-                return playSong(client, guildId, serverQueue.songs[0]);
-            }
-        } else if (!song.url.startsWith('http')) {
+        // Handle search queries or regular URLs
+        if (!song.url.startsWith('http')) {
             const searched = await play.search(song.url, { limit: 1 });
             if (searched && searched.length > 0) {
                 streamSource = searched[0].url;
             } else {
                 serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
+                serverQueue.songs.shift();
+                return playSong(client, guildId, serverQueue.songs[0]);
+            }
+        } else if (song.url.includes('spotify.com')) {
+            const searched = await play.search(song.title, { limit: 1 });
+            if (searched && searched.length > 0) {
+                streamSource = searched[0].url;
+            } else {
+                serverQueue.textChannel.send('❌ Could not resolve this Spotify link to a playable track.').catch(() => {});
                 serverQueue.songs.shift();
                 return playSong(client, guildId, serverQueue.songs[0]);
             }
@@ -43,7 +43,6 @@ async function playSong(client, guildId, song) {
         serverQueue.textChannel.send(`🎶 Now playing: **${song.title}**`).catch(() => {});
     } catch (error) {
         console.error('Playback stream error:', error);
-        // Send the exact error message to Discord to see what failed
         serverQueue.textChannel.send(`❌ Error: ${error.message}`).catch(() => {});
         serverQueue.songs.shift();
         playSong(client, guildId, serverQueue.songs[0]);
@@ -52,11 +51,11 @@ async function playSong(client, guildId, song) {
 
 module.exports = {
     name: 'play',
-    description: 'Play music from YouTube or Spotify link/query',
+    description: 'Play music from YouTube or search query',
     options: [{
         name: 'song',
         type: 3,
-        description: 'The song name or URL (YouTube / Spotify)',
+        description: 'The song name or URL',
         required: true
     }],
     async execute(interaction) {
