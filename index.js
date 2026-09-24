@@ -1,9 +1,8 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
 require('dotenv').config();
 
-// Initialize the Discord client for "The Syndicate"
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -12,10 +11,9 @@ const client = new Client({
     ],
 });
 
-// Create a collection to hold all commands for easy management
 client.commands = new Collection();
+const commandsArray = [];
 
-// Load commands dynamically from the "commands" folder (for scaling up to 200+ commands)
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -24,58 +22,70 @@ if (fs.existsSync(commandsPath)) {
         const command = require(filePath);
         if ('name' in command && 'execute' in command) {
             client.commands.set(command.name, command);
+            // Prepare data for slash command registration
+            commandsArray.push({
+                name: command.name,
+                description: command.description || 'No description provided'
+            });
         }
     }
 }
 
-// Event: Triggered when "The Syndicate" goes online
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`The Syndicate is online and connected as ${client.user.tag}`);
-    // Set a simple, natural status without unnecessary show-off
-    client.user.setActivity('the chat', { type: 3 }); // 3 means WATCHING
+    client.user.setActivity('the chat', { type: 3 });
+
+    // Register slash commands globally
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    try {
+        console.log('Refreshing application slash commands...');
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commandsArray },
+        );
+        console.log('Successfully reloaded application slash commands.');
+    } catch (error) {
+        console.error(error);
+    }
 });
 
-// Casual, natural response arrays to keep interactions human-like
-const casualHellos = [
-    "Hey! What's up?",
-    "Yo, how's it going?",
-    "Hello there!",
-    "Sup? What brings you here?"
-];
+// Handle Slash Commands execution
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
 
-// Event: Handle incoming messages
+    const command = client.commands.get(interaction.commandName);
+    if (!command) return;
+
+    try {
+        await command.execute(interaction, []);
+    } catch (error) {
+        console.error(error);
+        if (interaction.replied || interaction.deferred) {
+            await interaction.followUp({ content: 'There was an error executing this command.', ephemeral: true });
+        } else {
+            await interaction.reply({ content: 'There was an error executing this command.', ephemeral: true });
+        }
+    }
+});
+
+// Handle text prefix commands if you still want them
 client.on('messageCreate', async (message) => {
-    // Ignore messages from bots or messages without a prefix (using '!')
-    if (message.author.bot || !message.content.startsWith('!')) return;
+    if (message.author.bot) return;
+    if (!message.content.startsWith('!')) return;
 
     const args = message.content.slice(1).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
 
-    // Check if command exists in our modular collection
     const command = client.commands.get(commandName);
     if (command) {
         try {
+            // Pass a pseudo-object or adapt command to handle message replies
+            // For slash-ready commands, we use interaction, but let's keep message reply fallback simple:
             await command.execute(message, args);
-            return;
         } catch (error) {
             console.error(error);
-            return;
         }
-    }
-
-    // Built-in simple fallback commands for quick testing
-    if (commandName === 'ping') {
-        message.reply('Pong!');
-    }
-
-    if (commandName === 'hello' || commandName === 'hi') {
-        await message.channel.sendTyping();
-        const randomResponse = casualHellos[Math.floor(Math.random() * casualHellos.length)];
-        setTimeout(() => {
-            message.reply(randomResponse);
-        }, 800);
     }
 });
 
-// Login securely using environment variable from Bot-hosting.net
 client.login(process.env.DISCORD_TOKEN);
