@@ -8,22 +8,19 @@ async function playSong(client, guildId, song) {
     try {
         let streamSource = song.url;
         
-        // Handle search queries or regular URLs
         if (!song.url.startsWith('http')) {
-            const searched = await play.search(song.url, { limit: 1 });
-            if (searched && searched.length > 0) {
-                streamSource = searched[0].url;
-            } else {
-                serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
-                serverQueue.songs.shift();
-                return playSong(client, guildId, serverQueue.songs[0]);
-            }
-        } else if (song.url.includes('spotify.com')) {
-            const searched = await play.search(song.title, { limit: 1 });
-            if (searched && searched.length > 0) {
-                streamSource = searched[0].url;
-            } else {
-                serverQueue.textChannel.send('❌ Could not resolve this Spotify link to a playable track.').catch(() => {});
+            try {
+                const searched = await play.search(song.url, { limit: 1 });
+                if (searched && searched.length > 0) {
+                    streamSource = searched[0].url;
+                } else {
+                    serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
+                    serverQueue.songs.shift();
+                    return playSong(client, guildId, serverQueue.songs[0]);
+                }
+            } catch (searchError) {
+                console.error('Search error:', searchError);
+                serverQueue.textChannel.send('❌ YouTube search failed due to an API change. Please try using a direct YouTube URL instead.').catch(() => {});
                 serverQueue.songs.shift();
                 return playSong(client, guildId, serverQueue.songs[0]);
             }
