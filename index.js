@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const translate = require('translate-google-api');
 require('dotenv').config();
 
 const client = new Client({
@@ -126,8 +126,10 @@ client.on('messageCreate', async (message) => {
 
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
-            const result = await translate(message.content, { to: 'en' });
-            const translatedText = Array.isArray(result) ? result[0] : result;
+            const encodedText = encodeURIComponent(message.content);
+            const response = await axios.get(`https://api.mymemory.translated.net/get?q=${encodedText}&langpair=autodetect|en`);
+            const translatedText = response.data.responseData.translatedText;
+
             if (translatedText && translatedText.toLowerCase() !== message.content.toLowerCase()) {
                 await message.channel.send(`💬 **${message.author.username}:** ${translatedText}`);
                 await message.delete().catch(() => {});
@@ -160,7 +162,6 @@ client.on('interactionCreate', async interaction => {
                     await interaction.member.roles.add(role);
                 }
                 
-                // Check if it's a temporary private verify channel before deleting
                 if (interaction.channel.name.startsWith('verify-')) {
                     await interaction.reply({ content: '✅ Verified successfully! Channel will close shortly.', ephemeral: true });
                     setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
@@ -210,7 +211,6 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-            // Check if it's a temporary private verify channel before deleting
             if (interaction.channel.name.startsWith('verify-')) {
                 await interaction.reply({ content: `✅ Verified successfully! Channel will close shortly.`, ephemeral: true });
                 setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
