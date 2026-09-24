@@ -42,4 +42,4 @@ async function sendErrorLog(client, errorType, error) {
     } catch (err) {
         console.error('Failed to send error log to Discord channel:', err);
     }
-          }
+}
