@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const translate = require('translate-google-api');
 require('dotenv').config();
 
@@ -16,6 +17,9 @@ const client = new Client({
 
 client.commands = new Collection();
 const commandsArray = [];
+
+// Music queues map for managing songs and connections per guild
+const musicQueues = new Map();
 
 // Configurations & Channel IDs
 const TRANSLATION_CHANNEL_ID = '1538595475794563167';
@@ -42,7 +46,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Load command files dynamically
+// Load command files dynamically if folder exists, or define default slash commands
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -56,6 +60,20 @@ if (fs.existsSync(commandsPath)) {
                 description: command.description || 'No description provided'
             });
         }
+    }
+}
+
+// Ensure built-in slash commands are also registered
+const builtInCommands = [
+    { name: 'play', description: 'Play music in a voice channel' },
+    { name: 'clear', description: 'Delete messages' },
+    { name: 'help', description: 'Show all available commands' },
+    { name: 'kick', description: 'Kick a member from the server' }
+];
+
+for (const cmd of builtInCommands) {
+    if (!commandsArray.some(c => c.name === cmd.name)) {
+        commandsArray.push(cmd);
     }
 }
 
@@ -86,15 +104,15 @@ client.on('guildMemberAdd', async (member) => {
             type: ChannelType.GuildText,
             permissionOverwrites: [
                 {
-                    id: member.guild.id, // @everyone
+                    id: member.guild.id,
                     deny: [PermissionFlagsBits.ViewChannel],
                 },
                 {
-                    id: member.id, // The new user
+                    id: member.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
                 },
                 {
-                    id: client.user.id, // The bot
+                    id: client.user.id,
                     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
                 }
             ]
@@ -131,7 +149,7 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // Translation Logic (Deletes original message and sends clean translation)
+    // Translation Logic
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
             const result = await translate(message.content, { to: 'en' });
@@ -161,6 +179,26 @@ client.on('messageCreate', async (message) => {
     if (!message.content.startsWith('!')) return;
     const args = message.content.slice(1).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
+
+    // Handle legacy prefix play/join commands directly if needed
+    if (commandName === 'play' || commandName === 'join') {
+        const voiceChannel = message.member?.voice.channel;
+        if (!voiceChannel) {
+            return message.reply('❌ You need to be in a voice channel to play music!');
+        }
+        try {
+            const connection = joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId: message.guild.id,
+                adapterCreator: message.guild.voiceAdapterCreator,
+            });
+            return message.reply(`✅ Connected to **${voiceChannel.name}**!`);
+        } catch (error) {
+            console.error(error);
+            return message.reply('❌ Failed to connect to the voice channel.');
+        }
+    }
+
     const command = client.commands.get(commandName);
     if (command) {
         try {
@@ -176,12 +214,7 @@ client.on('interactionCreate', async interaction => {
     try {
         // A. Music Control Buttons Handler (Skip / Disconnect)
         if (interaction.isButton() && (interaction.customId === 'music_skip' || interaction.customId === 'music_disconnect')) {
-            const playCommand = client.commands.get('play');
-            if (!playCommand || !playCommand.musicQueues) {
-                return interaction.reply({ content: '❌ Music system is not active.', ephemeral: true });
-            }
-            
-            const serverQueue = playCommand.musicQueues.get(interaction.guild.id);
+            const serverQueue = musicQueues.get(interaction.guild.id);
 
             if (!interaction.member.voice.channel) {
                 return interaction.reply({ content: '❌ You must be in a voice channel to use music controls!', ephemeral: true });
@@ -197,7 +230,7 @@ client.on('interactionCreate', async interaction => {
             } else if (interaction.customId === 'music_disconnect') {
                 serverQueue.songs = [];
                 serverQueue.connection.destroy();
-                playCommand.musicQueues.delete(interaction.guild.id);
+                musicQueues.delete(interaction.guild.id);
                 await interaction.reply({ content: '⏹️ Disconnected from voice channel.', ephemeral: true });
             }
             return;
@@ -276,9 +309,47 @@ client.on('interactionCreate', async interaction => {
 
         // D. Slash Commands Handler
         if (!interaction.isChatInputCommand()) return;
+
+        if (interaction.commandName === 'play') {
+            const voiceChannel = interaction.member.voice.channel;
+            if (!voiceChannel) {
+                return interaction.reply({ content: '❌ You need to be in a voice channel to play music!', ephemeral: true });
+            }
+
+            await interaction.reply(`🎵 Connecting to **${voiceChannel.name}** and ready for audio stream!`);
+
+            try {
+                let serverQueue = musicQueues.get(interaction.guild.id);
+                if (!serverQueue) {
+                    const connection = joinVoiceChannel({
+                        channelId: voiceChannel.id,
+                        guildId: interaction.guild.id,
+                        adapterCreator: interaction.guild.voiceAdapterCreator,
+                    });
+
+                    const player = createAudioPlayer();
+                    serverQueue = {
+                        textChannel: interaction.channel,
+                        voiceChannel: voiceChannel,
+                        connection: connection,
+                        player: player,
+                        songs: [],
+                    };
+
+                    musicQueues.set(interaction.guild.id, serverQueue);
+                    connection.subscribe(player);
+                }
+            } catch (error) {
+                console.error('Voice connection error:', error);
+                await interaction.followUp({ content: '❌ Could not join the voice channel.', ephemeral: true });
+            }
+            return;
+        }
+
         const command = client.commands.get(interaction.commandName);
-        if (!command) return;
-        await command.execute(interaction);
+        if (command) {
+            await command.execute(interaction);
+        }
 
     } catch (error) {
         console.error('Interaction error:', error);
