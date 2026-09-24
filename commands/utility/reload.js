@@ -17,10 +17,12 @@ module.exports = {
             return interaction.reply({ content: `❌ Nessun comando trovato con il nome \`${commandName}\`!`, ephemeral: true });
         }
 
-        delete require.cache[require.resolve(`./${command.data.name}.js`)];
-
         try {
-            const newCommand = require(`./${command.data.name}.js`);
+            // Path ko dynamic ya relative rakhne ke liye safe tareeqa
+            const commandPath = require.resolve(`./${command.data.name}.js`);
+            delete require.cache[commandPath];
+
+            const newCommand = require(commandPath);
             interaction.client.commands.set(newCommand.data.name, newCommand);
             await interaction.reply({ content: `✅ Il comando \`${newCommand.data.name}\` è stato ricaricato con successo!`, ephemeral: true });
         } catch (error) {
