@@ -10,6 +10,7 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates,
     ],
 });
 
@@ -60,7 +61,7 @@ if (fs.existsSync(commandsPath)) {
 
 client.once('ready', async () => {
     console.log(`The Syndicate is online and connected as ${client.user.tag}`);
-    client.user.setActivity('the chat', { type: 3 });
+    client.user.setActivity('HD music & chat', { type: 2 });
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
@@ -126,7 +127,7 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Message event handling (Translation with auto-delete original, Anti-Link, and Text Prefix Commands)
+// Message event handling (Translation, Anti-Link, and Text Prefix Commands)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
@@ -173,7 +174,36 @@ client.on('messageCreate', async (message) => {
 // Handle Button Clicks, Modals, and Slash Commands
 client.on('interactionCreate', async interaction => {
     try {
-        // A. Button Clicks Handler
+        // A. Music Control Buttons Handler (Skip / Disconnect)
+        if (interaction.isButton() && (interaction.customId === 'music_skip' || interaction.customId === 'music_disconnect')) {
+            const playCommand = client.commands.get('play');
+            if (!playCommand || !playCommand.musicQueues) {
+                return interaction.reply({ content: '❌ Music system is not active.', ephemeral: true });
+            }
+            
+            const serverQueue = playCommand.musicQueues.get(interaction.guild.id);
+
+            if (!interaction.member.voice.channel) {
+                return interaction.reply({ content: '❌ You must be in a voice channel to use music controls!', ephemeral: true });
+            }
+
+            if (!serverQueue) {
+                return interaction.reply({ content: '❌ There is no music playing right now.', ephemeral: true });
+            }
+
+            if (interaction.customId === 'music_skip') {
+                serverQueue.player.stop();
+                await interaction.reply({ content: '⏭️ Skipped current song.', ephemeral: true });
+            } else if (interaction.customId === 'music_disconnect') {
+                serverQueue.songs = [];
+                serverQueue.connection.destroy();
+                playCommand.musicQueues.delete(interaction.guild.id);
+                await interaction.reply({ content: '⏹️ Disconnected from voice channel.', ephemeral: true });
+            }
+            return;
+        }
+
+        // B. Verification Button Clicks Handler
         if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
             const platformKey = interaction.customId.replace('verify_', '');
             const role = await getOrCreateVerifiedRole(interaction.guild);
@@ -206,7 +236,7 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
-        // B. Modal Submit Handler
+        // C. Modal Submit Handler
         if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
             const platformKey = interaction.customId.replace('modal_', '');
             const platformName = platformKey.toUpperCase();
@@ -244,7 +274,7 @@ client.on('interactionCreate', async interaction => {
             return;
         }
 
-        // C. Slash Commands Handler
+        // D. Slash Commands Handler
         if (!interaction.isChatInputCommand()) return;
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
