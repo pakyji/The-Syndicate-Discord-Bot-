@@ -159,8 +159,14 @@ client.on('interactionCreate', async interaction => {
                 if (role && !interaction.member.roles.cache.has(role.id)) {
                     await interaction.member.roles.add(role);
                 }
-                await interaction.reply({ content: '✅ Verified successfully! Channel will close shortly.', ephemeral: true });
-                setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
+                
+                // Check if it's a temporary private verify channel before deleting
+                if (interaction.channel.name.startsWith('verify-')) {
+                    await interaction.reply({ content: '✅ Verified successfully! Channel will close shortly.', ephemeral: true });
+                    setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
+                } else {
+                    await interaction.reply({ content: '✅ Verified successfully!', ephemeral: true });
+                }
                 return;
             }
 
@@ -204,8 +210,13 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-            await interaction.reply({ content: `✅ Verified successfully! Channel will close shortly.`, ephemeral: true });
-            setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
+            // Check if it's a temporary private verify channel before deleting
+            if (interaction.channel.name.startsWith('verify-')) {
+                await interaction.reply({ content: `✅ Verified successfully! Channel will close shortly.`, ephemeral: true });
+                setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
+            } else {
+                await interaction.reply({ content: `✅ Verified successfully!`, ephemeral: true });
+            }
             return;
         }
 
