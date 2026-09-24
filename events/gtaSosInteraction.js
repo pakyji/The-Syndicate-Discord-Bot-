@@ -79,7 +79,7 @@ module.exports = {
 
             const noteInput = new TextInputBuilder()
                 .setCustomId('user_custom_note')
-                .setLabel('Any specific details? (Mic, Players needed etc.)')
+                .setLabel('Specific details (Mic, players, etc.)') // Character length fixed (< 45 chars)
                 .setStyle(TextInputStyle.Paragraph)
                 .setPlaceholder('E.g., Need 2 more players, mic required, hard mode...')
                 .setRequired(false)
@@ -132,13 +132,6 @@ module.exports = {
                     const encoded = encodeURIComponent(textToTranslate);
                     const transRes = await axios.get(`https://api.mymemory.translated.net/get?q=${encoded}&langpair=en|it`);
                     const translatedText = transRes.data.responseData.translatedText || textToTranslate;
-
-                    const italianDescription = `🚨 **Nuova Richiesta SOS GTA LFG!**\n\n` +
-                        `👤 **Utente:** <@${interaction.user.id}>\n` +
-                        `🎯 **Attività:** ${category}\n` +
-                        `🎮 **Piattaforma:** ${platform}\n` +
-                        `💬 **Nota:** ${customNote}\n\n` +
-                        `*(Traduzione: ${translatedText})*`; // Agar aapko bilkul hi translation line nahi chahiye, toh bataiyega isay bhi hata denge!
 
                     const italianEmbed = new EmbedBuilder()
                         .setColor('#00AAFF')
