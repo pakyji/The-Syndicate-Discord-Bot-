@@ -21,6 +21,23 @@ module.exports = {
     name: 'guildMemberAdd',
     async execute(member, client) {
         try {
+            // 1. Send Public Welcome Message to your Welcome Channel
+            const welcomeChannelId = '901709300383227934';
+            const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
+            
+            if (welcomeChannel) {
+                const welcomeEmbed = new EmbedBuilder()
+                    .setColor(0x00FF00)
+                    .setTitle('👋 New Member Joined!')
+                    .setDescription(`Welcome to **${member.guild.name}**, ${member}! We are glad to have you here.`)
+                    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+                    .addFields({ name: 'Total Members', value: `${member.guild.memberCount}`, inline: true })
+                    .setTimestamp();
+
+                await welcomeChannel.send({ embeds: [welcomeEmbed] }).catch(() => {});
+            }
+
+            // 2. Create Verification Role & Private Ticket-style Channel
             await getOrCreateVerifiedRole(member.guild);
 
             const verificationChannel = await member.guild.channels.create({
