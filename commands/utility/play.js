@@ -8,7 +8,6 @@ async function playSong(client, guildId, song) {
     try {
         let streamSource = song.url;
         
-        // Handle Spotify link resolution
         if (play.is_spotify(song.url)) {
             const spotifyData = await play.spotify(song.url);
             const searched = await play.search(`${spotifyData.name} ${spotifyData.artists[0]?.name || ''}`, { limit: 1 });
@@ -44,7 +43,8 @@ async function playSong(client, guildId, song) {
         serverQueue.textChannel.send(`🎶 Now playing: **${song.title}**`).catch(() => {});
     } catch (error) {
         console.error('Playback stream error:', error);
-        serverQueue.textChannel.send('❌ An error occurred while playing the track.').catch(() => {});
+        // Send the exact error message to Discord to see what failed
+        serverQueue.textChannel.send(`❌ Error: ${error.message}`).catch(() => {});
         serverQueue.songs.shift();
         playSong(client, guildId, serverQueue.songs[0]);
     }
