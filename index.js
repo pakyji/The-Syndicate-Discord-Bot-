@@ -14,6 +14,7 @@ const client = new Client({
 client.commands = new Collection();
 const commandsArray = [];
 
+// Load command files dynamically
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -22,7 +23,6 @@ if (fs.existsSync(commandsPath)) {
         const command = require(filePath);
         if ('name' in command && 'execute' in command) {
             client.commands.set(command.name, command);
-            // Prepare data for slash command registration
             commandsArray.push({
                 name: command.name,
                 description: command.description || 'No description provided'
@@ -49,6 +49,38 @@ client.once('ready', async () => {
     }
 });
 
+// Anti-link security check with DM warning
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.guild) return;
+
+    const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
+
+    if (linkRegex.test(message.content)) {
+        try {
+            await message.delete();
+            await message.author.send(`Hey! Links are not allowed in **${message.guild.name}**. Your message containing a link was deleted.`);
+        } catch (error) {
+            console.error('Could not send DM to the user:', error);
+        }
+        return;
+    }
+
+    // Handle text prefix commands (!command) as a fallback
+    if (!message.content.startsWith('!')) return;
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const commandName = args.shift().toLowerCase();
+
+    const command = client.commands.get(commandName);
+    if (command) {
+        try {
+            await command.execute(message, args);
+        } catch (error) {
+            console.error(error);
+        }
+    }
+});
+
 // Handle Slash Commands execution
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
@@ -60,30 +92,11 @@ client.on('interactionCreate', async interaction => {
         await command.execute(interaction, []);
     } catch (error) {
         console.error(error);
+        const errorReply = { content: 'There was an error executing this command.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: 'There was an error executing this command.', ephemeral: true });
+            await interaction.followUp(errorReply);
         } else {
-            await interaction.reply({ content: 'There was an error executing this command.', ephemeral: true });
-        }
-    }
-});
-
-// Handle text prefix commands if you still want them
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.content.startsWith('!')) return;
-
-    const args = message.content.slice(1).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    const command = client.commands.get(commandName);
-    if (command) {
-        try {
-            // Pass a pseudo-object or adapt command to handle message replies
-            // For slash-ready commands, we use interaction, but let's keep message reply fallback simple:
-            await command.execute(message, args);
-        } catch (error) {
-            console.error(error);
+            await interaction.reply(errorReply);
         }
     }
 });
