@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
+const { getVoiceConnection } = require('@discordjs/voice');
 const translate = require('translate-google-api');
 require('dotenv').config();
 
@@ -15,6 +16,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
+client.musicQueues = new Map(); // Fixed: Initialized music queues map here
 const commandsArray = [];
 
 // Configurations & Channel IDs
@@ -24,7 +26,7 @@ const PS5_CHANNEL_ID = '1550856575495839824';
 const PC_CHANNEL_ID = '1535658134230671370';
 const VERIFIED_ROLE_NAME = 'Verified';
 
-// Helper function to get or automatically create the 'Verified' role
+// Helper function to get or create the 'Verified' role
 async function getOrCreateVerifiedRole(guild) {
     let role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
     if (!role) {
@@ -34,7 +36,6 @@ async function getOrCreateVerifiedRole(guild) {
                 color: '#00FF00',
                 reason: 'Auto-created by The Syndicate bot for member verification',
             });
-            console.log(`Created missing '${VERIFIED_ROLE_NAME}' role in guild: ${guild.name}`);
         } catch (error) {
             console.error('Failed to create Verified role:', error);
         }
@@ -42,7 +43,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Recursive function to load commands from subcategories/folders automatically
+// Recursive function to load commands from subfolders (like commands/utility/)
 const loadCommands = (dir) => {
     const files = fs.readdirSync(dir);
     for (const file of files) {
@@ -50,7 +51,7 @@ const loadCommands = (dir) => {
         const stat = fs.statSync(filePath);
 
         if (stat.isDirectory()) {
-            loadCommands(filePath); // Folders/Categories ke andar jao
+            loadCommands(filePath);
         } else if (file.endsWith('.js')) {
             const command = require(filePath);
             if ('name' in command && 'execute' in command) {
@@ -70,13 +71,13 @@ if (fs.existsSync(commandsPath)) {
     loadCommands(commandsPath);
 }
 
+// Register slash commands when bot is ready
 client.once('ready', async () => {
-    console.log(`The Syndicate is online and connected as ${client.user.tag}`);
-    client.user.setActivity('The Syndicate Chat', { type: 2 });
+    console.log(`The Syndicate is online as ${client.user.tag}`);
+    client.user.setActivity('HD music & chat', { type: 2 });
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        console.log('Refreshing application slash commands...');
         await rest.put(
             Routes.applicationCommands(client.user.id),
             { body: commandsArray },
@@ -87,7 +88,7 @@ client.once('ready', async () => {
     }
 });
 
-// New Member Join Verification System
+// New Member Join Event
 client.on('guildMemberAdd', async (member) => {
     try {
         await getOrCreateVerifiedRole(member.guild);
@@ -101,9 +102,6 @@ client.on('guildMemberAdd', async (member) => {
                 { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] }
             ]
         });
-
-        const welcomeText = `Welcome to **${member.guild.name}**! Please use your private verification channel <#${verificationChannel.id}> to select your gaming platform and get verified.`;
-        await member.send(welcomeText).catch(() => {});
 
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
@@ -123,7 +121,7 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// Message event handling (Translation & Anti-Link)
+// Message event handling (Translation & Anti-Link Filter)
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
@@ -149,22 +147,9 @@ client.on('messageCreate', async (message) => {
         } catch (error) {}
         return;
     }
-
-    if (!message.content.startsWith('!')) return;
-    const args = message.content.slice(1).trim().split(/ +/);
-    const commandName = args.shift().toLowerCase();
-
-    const command = client.commands.get(commandName);
-    if (command) {
-        try {
-            await command.execute(message, args);
-        } catch (error) {
-            console.error(error);
-        }
-    }
 });
 
-// Interaction Handling (Buttons, Modals, Slash Commands)
+// Handle Interactions
 client.on('interactionCreate', async interaction => {
     try {
         if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
@@ -175,7 +160,7 @@ client.on('interactionCreate', async interaction => {
                 if (role && !interaction.member.roles.cache.has(role.id)) {
                     await interaction.member.roles.add(role);
                 }
-                await interaction.reply({ content: '✅ Verified successfully as Non-Gamer! This channel will now close.', ephemeral: true });
+                await interaction.reply({ content: '✅ Verified successfully! Channel will close shortly.', ephemeral: true });
                 setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
                 return;
             }
@@ -220,7 +205,7 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-            await interaction.reply({ content: `✅ Verified successfully! Your ${platformName} ID has been submitted. This channel will now close.`, ephemeral: true });
+            await interaction.reply({ content: `✅ Verified successfully! Channel will close shortly.`, ephemeral: true });
             setTimeout(() => { interaction.channel.delete().catch(() => {}); }, 5000);
             return;
         }
@@ -234,7 +219,7 @@ client.on('interactionCreate', async interaction => {
 
     } catch (error) {
         console.error('Interaction error:', error);
-        const errorReply = { content: 'An error occurred.', ephemeral: true };
+        const errorReply = { content: `❌ Error: ${error.message}`, ephemeral: true };
         if (interaction.replied || interaction.deferred) {
             await interaction.followUp(errorReply).catch(() => {});
         } else {
