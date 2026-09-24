@@ -41,7 +41,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Load command files dynamically (including setup.js)
+// Load command files dynamically
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
