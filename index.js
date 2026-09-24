@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const translate = require('@vitalets/google-translate-api');
+const translate = require('translate-google-api');
 require('dotenv').config();
 
 const client = new Client({
@@ -30,7 +30,7 @@ async function getOrCreateVerifiedRole(guild) {
         try {
             role = await guild.roles.create({
                 name: VERIFIED_ROLE_NAME,
-                color: '#00FF00', // Green color for verified members
+                color: '#00FF00',
                 reason: 'Auto-created by The Syndicate bot for member verification',
             });
             console.log(`Created missing '${VERIFIED_ROLE_NAME}' role in guild: ${guild.name}`);
@@ -41,7 +41,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Load command files dynamically
+// Load command files dynamically (including setup.js)
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -75,13 +75,11 @@ client.once('ready', async () => {
     }
 });
 
-// 1. New Member Join: Create a private temporary verification channel & send DM
+// 1. New Member Join: Create private verification channel & send DM
 client.on('guildMemberAdd', async (member) => {
     try {
-        // Ensure the Verified role exists when someone joins
         await getOrCreateVerifiedRole(member.guild);
 
-        // Create a private channel visible ONLY to this specific user and the bot
         const verificationChannel = await member.guild.channels.create({
             name: `verify-${member.user.username}`,
             type: ChannelType.GuildText,
@@ -103,10 +101,8 @@ client.on('guildMemberAdd', async (member) => {
 
         const welcomeText = `Welcome to **${member.guild.name}**! Please use your private verification channel <#${verificationChannel.id}> to select your gaming platform and get verified.`;
 
-        // Send DM
         await member.send(welcomeText).catch(() => {});
 
-        // Send the Verification Panel inside their private channel
         const embed = new EmbedBuilder()
             .setColor('#2b2d31')
             .setTitle('The Syndicate Verification')
@@ -134,11 +130,14 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
+    // Translation Logic
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
-            const res = await translate(message.content, { to: 'en' });
-            if (res.text.toLowerCase() !== message.content.toLowerCase()) {
-                await message.channel.send(`🌐 **Translation (${message.author.username}):** ${res.text}`);
+            const result = await translate(message.content, { to: 'en' });
+            const translatedText = Array.isArray(result) ? result[0] : result;
+
+            if (translatedText && translatedText.toLowerCase() !== message.content.toLowerCase()) {
+                await message.channel.send(`🌐 **Translation (${message.author.username}):** ${translatedText}`);
             }
         } catch (error) {
             console.error('Translation error:', error);
@@ -146,6 +145,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // Anti-Link Filter
     const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
     if (linkRegex.test(message.content)) {
         try {
@@ -155,6 +155,7 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // Text Prefix Commands (!command)
     if (!message.content.startsWith('!')) return;
     const args = message.content.slice(1).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
@@ -168,13 +169,12 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Handle Button Clicks, Modals, and Deleting the Channel on Success
+// Handle Button Clicks, Modals, and Slash Commands
 client.on('interactionCreate', async interaction => {
     try {
+        // A. Button Clicks Handler
         if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
             const platformKey = interaction.customId.replace('verify_', '');
-
-            // Get or create Verified role automatically
             const role = await getOrCreateVerifiedRole(interaction.guild);
 
             if (platformKey === 'nongamer') {
@@ -184,7 +184,6 @@ client.on('interactionCreate', async interaction => {
                 
                 await interaction.reply({ content: '✅ Verified successfully as Non-Gamer! This channel will now close.', ephemeral: true });
                 
-                // Delete temporary verification channel after 5 seconds
                 setTimeout(() => {
                     interaction.channel.delete().catch(() => {});
                 }, 5000);
@@ -206,12 +205,12 @@ client.on('interactionCreate', async interaction => {
             return await interaction.showModal(modal);
         }
 
+        // B. Modal Submit Handler
         if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
             const platformKey = interaction.customId.replace('modal_', '');
             const platformName = platformKey.toUpperCase();
             const gamertagId = interaction.fields.getTextInputValue('gamertag_input');
 
-            // Get or create Verified role automatically
             const role = await getOrCreateVerifiedRole(interaction.guild);
             if (role && !interaction.member.roles.cache.has(role.id)) {
                 await interaction.member.roles.add(role);
@@ -238,17 +237,17 @@ client.on('interactionCreate', async interaction => {
 
             await interaction.reply({ content: `✅ Verified successfully! Your ${platformName} ID has been submitted. This channel will now close.`, ephemeral: true });
 
-            // Delete temporary verification channel after 5 seconds
             setTimeout(() => {
                 interaction.channel.delete().catch(() => {});
             }, 5000);
             return;
         }
 
+        // C. Slash Commands Handler
         if (!interaction.isChatInputCommand()) return;
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
-        await command.execute(interaction, []);
+        await command.execute(interaction);
 
     } catch (error) {
         console.error('Interaction error:', error);
