@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
 const translate = require('@vitalets/google-translate-api');
 require('dotenv').config();
 
@@ -9,7 +9,7 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers, // Zaroori hai members join event aur role assign karne ke liye
+        GatewayIntentBits.GuildMembers,
     ],
 });
 
@@ -18,11 +18,28 @@ const commandsArray = [];
 
 // Configurations & Channel IDs
 const TRANSLATION_CHANNEL_ID = '1538595475794563167';
-const GAMERTAG_INPUT_CHANNEL_ID = '904332839758229544';
 const PS4_CHANNEL_ID = '901702088738865172';
 const PS5_CHANNEL_ID = '1550856575495839824';
 const PC_CHANNEL_ID = '1535658134230671370';
 const VERIFIED_ROLE_NAME = 'Verified';
+
+// Helper function to get or automatically create the 'Verified' role
+async function getOrCreateVerifiedRole(guild) {
+    let role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
+    if (!role) {
+        try {
+            role = await guild.roles.create({
+                name: VERIFIED_ROLE_NAME,
+                color: '#00FF00', // Green color for verified members
+                reason: 'Auto-created by The Syndicate bot for member verification',
+            });
+            console.log(`Created missing '${VERIFIED_ROLE_NAME}' role in guild: ${guild.name}`);
+        } catch (error) {
+            console.error('Failed to create Verified role:', error);
+        }
+    }
+    return role;
+}
 
 // Load command files dynamically
 const commandsPath = path.join(__dirname, 'commands');
@@ -45,7 +62,6 @@ client.once('ready', async () => {
     console.log(`The Syndicate is online and connected as ${client.user.tag}`);
     client.user.setActivity('the chat', { type: 3 });
 
-    // Register slash commands globally
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
         console.log('Refreshing application slash commands...');
@@ -59,23 +75,56 @@ client.once('ready', async () => {
     }
 });
 
-// New Member Join Handler (Both DM and Public Channel Guide)
+// 1. New Member Join: Create a private temporary verification channel & send DM
 client.on('guildMemberAdd', async (member) => {
     try {
-        const welcomeText = `Welcome to **${member.guild.name}**! Please head over to <#${GAMERTAG_INPUT_CHANNEL_ID}> to select your gaming platform and get verified.`;
-        
-        // 1. Send Direct Message (DM) to the user
-        await member.send(welcomeText).catch((err) => {
-            console.log(`Could not send DM to ${member.user.tag}:`, err.message);
+        // Ensure the Verified role exists when someone joins
+        await getOrCreateVerifiedRole(member.guild);
+
+        // Create a private channel visible ONLY to this specific user and the bot
+        const verificationChannel = await member.guild.channels.create({
+            name: `verify-${member.user.username}`,
+            type: ChannelType.GuildText,
+            permissionOverwrites: [
+                {
+                    id: member.guild.id, // @everyone
+                    deny: [PermissionFlagsBits.ViewChannel],
+                },
+                {
+                    id: member.id, // The new user
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+                },
+                {
+                    id: client.user.id, // The bot
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels],
+                }
+            ]
         });
 
-        // 2. Send Public Message in Verification Channel
-        const channel = member.guild.channels.cache.get(GAMERTAG_INPUT_CHANNEL_ID);
-        if (channel) {
-            const publicMsg = await channel.send(`Hey <@${member.id}>! ${welcomeText}`);
-            // Channel clean rakhne ke liye public message 2 minutes baad delete ho jayega
-            setTimeout(() => publicMsg.delete().catch(() => {}), 120000);
-        }
+        const welcomeText = `Welcome to **${member.guild.name}**! Please use your private verification channel <#${verificationChannel.id}> to select your gaming platform and get verified.`;
+
+        // Send DM
+        await member.send(welcomeText).catch(() => {});
+
+        // Send the Verification Panel inside their private channel
+        const embed = new EmbedBuilder()
+            .setColor('#2b2d31')
+            .setTitle('The Syndicate Verification')
+            .setDescription('Welcome! Click your gaming platform below to unlock the server.');
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('verify_ps4').setLabel('PS4').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
+            new ButtonBuilder().setCustomId('verify_ps5').setLabel('PS5').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
+            new ButtonBuilder().setCustomId('verify_pc').setLabel('PC').setStyle(ButtonStyle.Success).setEmoji('💻'),
+            new ButtonBuilder().setCustomId('verify_nongamer').setLabel('Non-Gamer').setStyle(ButtonStyle.Secondary).setEmoji('👤')
+        );
+
+        await verificationChannel.send({
+            content: `Hey <@${member.id}>! Welcome to the server.`,
+            embeds: [embed],
+            components: [row]
+        });
+
     } catch (error) {
         console.error('GuildMemberAdd error:', error);
     }
@@ -85,7 +134,6 @@ client.on('guildMemberAdd', async (member) => {
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // 1. Auto-Translate feature for the specified channel
     if (message.channel.id === TRANSLATION_CHANNEL_ID) {
         try {
             const res = await translate(message.content, { to: 'en' });
@@ -98,24 +146,18 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // 2. Anti-link security check with DM warning
     const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
     if (linkRegex.test(message.content)) {
         try {
             await message.delete();
-            await message.author.send(`Hey! Links are not allowed in **${message.guild.name}**. Your message containing a link was deleted.`);
-        } catch (error) {
-            console.error('Could not send DM to the user:', error);
-        }
+            await message.author.send(`Hey! Links are not allowed in **${message.guild.name}**.`);
+        } catch (error) {}
         return;
     }
 
-    // 3. Handle text prefix commands (!command)
     if (!message.content.startsWith('!')) return;
-
     const args = message.content.slice(1).trim().split(/ +/);
     const commandName = args.shift().toLowerCase();
-
     const command = client.commands.get(commandName);
     if (command) {
         try {
@@ -126,62 +168,60 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Handle Button Clicks, Modals, and Slash Commands
+// Handle Button Clicks, Modals, and Deleting the Channel on Success
 client.on('interactionCreate', async interaction => {
-    // A. Button Clicks Handler
-    if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
-        const platformKey = interaction.customId.replace('verify_', '');
+    try {
+        if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
+            const platformKey = interaction.customId.replace('verify_', '');
 
-        // Non-Gamer ke liye form ki zaroorat nahi
-        if (platformKey === 'nongamer') {
-            try {
-                const role = interaction.guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
+            // Get or create Verified role automatically
+            const role = await getOrCreateVerifiedRole(interaction.guild);
+
+            if (platformKey === 'nongamer') {
                 if (role && !interaction.member.roles.cache.has(role.id)) {
                     await interaction.member.roles.add(role);
                 }
-                return await interaction.reply({ content: '✅ You have been successfully verified as a **Non-Gamer**!', ephemeral: true });
-            } catch (error) {
-                console.error(error);
-                return await interaction.reply({ content: 'Failed to verify. Please contact an admin.', ephemeral: true });
+                
+                await interaction.reply({ content: '✅ Verified successfully as Non-Gamer! This channel will now close.', ephemeral: true });
+                
+                // Delete temporary verification channel after 5 seconds
+                setTimeout(() => {
+                    interaction.channel.delete().catch(() => {});
+                }, 5000);
+                return;
             }
+
+            const modal = new ModalBuilder()
+                .setCustomId(`modal_${platformKey}`)
+                .setTitle(`Enter your ${platformKey.toUpperCase()} ID`);
+
+            const idInput = new TextInputBuilder()
+                .setCustomId('gamertag_input')
+                .setLabel('Gamertag ID=')
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder('Type your ID here...')
+                .setRequired(true);
+
+            modal.addComponents(new ActionRowBuilder().addComponents(idInput));
+            return await interaction.showModal(modal);
         }
 
-        // PS4, PS5, ya PC ke liye Modal (Popup Form) kholna
-        const modal = new ModalBuilder()
-            .setCustomId(`modal_${platformKey}`)
-            .setTitle(`Enter your ${platformKey.toUpperCase()} ID`);
+        if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
+            const platformKey = interaction.customId.replace('modal_', '');
+            const platformName = platformKey.toUpperCase();
+            const gamertagId = interaction.fields.getTextInputValue('gamertag_input');
 
-        const idInput = new TextInputBuilder()
-            .setCustomId('gamertag_input')
-            .setLabel('Gamertag ID=')
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder('Type your ID here...')
-            .setRequired(true);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(idInput));
-        return await interaction.showModal(modal);
-    }
-
-    // B. Modal Submit Handler
-    if (interaction.isModalSubmit() && interaction.customId.startsWith('modal_')) {
-        const platformKey = interaction.customId.replace('modal_', '');
-        const platformName = platformKey.toUpperCase();
-        const gamertagId = interaction.fields.getTextInputValue('gamertag_input');
-
-        try {
-            // 1. Assign Verified Role
-            const role = interaction.guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
+            // Get or create Verified role automatically
+            const role = await getOrCreateVerifiedRole(interaction.guild);
             if (role && !interaction.member.roles.cache.has(role.id)) {
                 await interaction.member.roles.add(role);
             }
 
-            // 2. Determine target channel ID
             let targetChannelId = '';
             if (platformKey === 'ps4') targetChannelId = PS4_CHANNEL_ID;
             if (platformKey === 'ps5') targetChannelId = PS5_CHANNEL_ID;
             if (platformKey === 'pc') targetChannelId = PC_CHANNEL_ID;
 
-            // 3. Send to target channel in your exact format
             if (targetChannelId) {
                 const targetChannel = interaction.guild.channels.cache.get(targetChannelId);
                 if (targetChannel) {
@@ -192,34 +232,31 @@ client.on('interactionCreate', async interaction => {
                             `Platform: **${platformName}**\n` +
                             `Gamertag ID:\n**${gamertagId}**`
                         );
-
                     await targetChannel.send({ embeds: [idCard] });
                 }
             }
 
-            await interaction.reply({ content: `✅ Verified successfully! Your ${platformName} ID has been submitted.`, ephemeral: true });
-        } catch (error) {
-            console.error('Modal submit error:', error);
-            await interaction.reply({ content: 'There was an error processing your submission.', ephemeral: true });
+            await interaction.reply({ content: `✅ Verified successfully! Your ${platformName} ID has been submitted. This channel will now close.`, ephemeral: true });
+
+            // Delete temporary verification channel after 5 seconds
+            setTimeout(() => {
+                interaction.channel.delete().catch(() => {});
+            }, 5000);
+            return;
         }
-        return;
-    }
 
-    // C. Slash Commands Handler
-    if (!interaction.isChatInputCommand()) return;
-
-    const command = client.commands.get(interaction.commandName);
-    if (!command) return;
-
-    try {
+        if (!interaction.isChatInputCommand()) return;
+        const command = client.commands.get(interaction.commandName);
+        if (!command) return;
         await command.execute(interaction, []);
+
     } catch (error) {
-        console.error(error);
-        const errorReply = { content: 'There was an error executing this command.', ephemeral: true };
+        console.error('Interaction error:', error);
+        const errorReply = { content: 'Si è verificato un errore.', ephemeral: true };
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp(errorReply);
+            await interaction.followUp(errorReply).catch(() => {});
         } else {
-            await interaction.reply(errorReply);
+            await interaction.reply(errorReply).catch(() => {});
         }
     }
 });
