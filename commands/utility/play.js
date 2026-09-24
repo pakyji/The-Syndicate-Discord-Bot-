@@ -1,7 +1,6 @@
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, demuxProbe } = require('@discordjs/voice');
 const play = require('play-dl');
 
-// Helper function to play songs sequentially in order
 async function playSong(client, guildId, song) {
     const serverQueue = client.musicQueues.get(guildId);
     if (!serverQueue || !song) return;
@@ -9,14 +8,14 @@ async function playSong(client, guildId, song) {
     try {
         let streamSource = song.url;
         
-        // Handle Spotify link resolution
+        // Risoluzione link Spotify
         if (play.is_spotify(song.url)) {
             const spotifyData = await play.spotify(song.url);
             const searched = await play.search(`${spotifyData.name} ${spotifyData.artists[0]?.name || ''}`, { limit: 1 });
             if (searched && searched.length > 0) {
                 streamSource = searched[0].url;
             } else {
-                serverQueue.textChannel.send('❌ Could not find a playable source for this Spotify track.').catch(() => {});
+                serverQueue.textChannel.send('❌ Impossibile trovare una fonte riproducibile per questo brano Spotify.').catch(() => {});
                 serverQueue.songs.shift();
                 return playSong(client, guildId, serverQueue.songs[0]);
             }
@@ -25,24 +24,30 @@ async function playSong(client, guildId, song) {
             if (searched && searched.length > 0) {
                 streamSource = searched[0].url;
             } else {
-                serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
+                serverQueue.textChannel.send('❌ Nessun risultato trovato per la ricerca.').catch(() => {});
                 serverQueue.songs.shift();
                 return playSong(client, guildId, serverQueue.songs[0]);
             }
         }
 
-        const stream = await play.stream(streamSource);
-        const resource = createAudioResource(stream.stream, { 
-            inputType: stream.type,
+        // Ottiene lo stream audio tramite play-dl
+        const sourceStream = await play.stream(streamSource);
+        
+        // Usa demuxProbe per evitare il blocco sul caricamento ed estrarre il tipo corretto
+        const { stream, type } = await demuxProbe(sourceStream.stream);
+
+        const resource = createAudioResource(stream, { 
+            inputType: type,
             inlineVolume: true 
         });
         
         resource.volume.setVolume(1.0);
         serverQueue.player.play(resource);
 
-        serverQueue.textChannel.send(`🎶 Now playing: **${song.title}**`).catch(() => {});
+        serverQueue.textChannel.send(`🎶 In riproduzione: **${song.title}**`).catch(() => {});
     } catch (error) {
-        console.error('Playback stream error:', error);
+        console.error('Errore durante lo streaming:', error);
+        serverQueue.textChannel.send('❌ Si è verificato un errore durante la riproduzione del brano.').catch(() => {});
         serverQueue.songs.shift();
         playSong(client, guildId, serverQueue.songs[0]);
     }
@@ -50,17 +55,17 @@ async function playSong(client, guildId, song) {
 
 module.exports = {
     name: 'play',
-    description: 'Play music from YouTube or Spotify link/query',
+    description: 'Riproduci musica da YouTube o Spotify',
     options: [{
         name: 'song',
-        type: 3, // STRING type
-        description: 'The song name or URL (YouTube / Spotify)',
+        type: 3,
+        description: 'Nome del brano o link (YouTube / Spotify)',
         required: true
     }],
     async execute(interaction) {
         const voiceChannel = interaction.member.voice.channel;
         if (!voiceChannel) {
-            return interaction.reply({ content: '❌ You need to be in a voice channel to play music!', ephemeral: true });
+            return interaction.reply({ content: '❌ Devi essere in un canale vocale per ascoltare la musica!', ephemeral: true });
         }
 
         const songQuery = interaction.options.getString('song');
@@ -76,6 +81,7 @@ module.exports = {
             });
             const player = createAudioPlayer();
             serverQueue = { textChannel: interaction.channel, voiceChannel, connection, player, songs: [] };
+            interaction.client.musicQueues.get = interaction.client.musicQueues.get || (() => serverQueue); // Safe fallback
             interaction.client.musicQueues.set(interaction.guild.id, serverQueue);
             connection.subscribe(player);
 
@@ -83,14 +89,20 @@ module.exports = {
                 serverQueue.songs.shift();
                 playSong(interaction.client, interaction.guild.id, serverQueue.songs[0]);
             });
+
+            player.on('error', error => {
+                console.error('Errore del player audio:', error);
+                serverQueue.songs.shift();
+                playSong(interaction.client, interaction.guild.id, serverQueue.songs[0]);
+            });
         }
 
         serverQueue.songs.push({ title: songQuery, url: songQuery });
         if (serverQueue.songs.length === 1) {
-            await interaction.editReply(`🎵 Loading song...`);
+            await interaction.editReply(`🎵 Caricamento in corso...`);
             playSong(interaction.client, interaction.guild.id, serverQueue.songs[0]);
         } else {
-            await interaction.editReply(`📥 Added to queue: **${songQuery}**`);
+            await interaction.editReply(`📥 Aggiunto alla coda: **${songQuery}**`);
         }
     },
 };
