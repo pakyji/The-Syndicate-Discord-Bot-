@@ -1,27 +1,39 @@
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const VERIFIED_ROLE_NAME = 'Verified';
 
-async function getOrCreateVerifiedRole(guild) {
-    let role = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
-    if (!role) {
+async function updateOrCreateServerStats(guild) {
+    let statsChannel = guild.channels.cache.find(c => c.name.startsWith('📊 Members:'));
+    
+    if (!statsChannel) {
         try {
-            role = await guild.roles.create({
-                name: VERIFIED_ROLE_NAME,
-                color: '#00FF00',
-                reason: 'Auto-created by The Syndicate bot for member verification',
+            statsChannel = await guild.channels.create({
+                name: `📊 Members: ${guild.memberCount}`,
+                type: ChannelType.GuildVoice,
+                position: 0, // Server ke bilkul top par rakhne ke liye
+                permissionOverwrites: [
+                    {
+                        id: guild.id,
+                        deny: [PermissionFlagsBits.Connect], // Koi voice channel mein join na kar sake
+                    },
+                ],
             });
         } catch (error) {
-            console.error('Failed to create Verified role:', error);
+            console.error('Failed to create stats channel:', error);
         }
+    } else {
+        await statsChannel.setName(`📊 Members: ${guild.memberCount}`).catch(() => {});
+        await statsChannel.setPosition(0).catch(() => {});
     }
-    return role;
 }
 
 module.exports = {
     name: 'guildMemberAdd',
     async execute(member, client) {
         try {
-            // 1. Send Public Welcome Message to your Welcome Channel
+            // 1. Update or Create Server Stats at the Top
+            await updateOrCreateServerStats(member.guild);
+
+            // 2. Send Public Welcome Message (Channel ID: 901709300383227934)
             const welcomeChannelId = '901709300383227934';
             const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
             
@@ -37,8 +49,15 @@ module.exports = {
                 await welcomeChannel.send({ embeds: [welcomeEmbed] }).catch(() => {});
             }
 
-            // 2. Create Verification Role & Private Ticket-style Channel
-            await getOrCreateVerifiedRole(member.guild);
+            // 3. Create Verification Role & Private Ticket Channel
+            let role = member.guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
+            if (!role) {
+                role = await member.guild.roles.create({
+                    name: VERIFIED_ROLE_NAME,
+                    color: '#00FF00',
+                    reason: 'Auto-created by The Syndicate bot for member verification',
+                }).catch(() => {});
+            }
 
             const verificationChannel = await member.guild.channels.create({
                 name: `verify-${member.user.username}`,
