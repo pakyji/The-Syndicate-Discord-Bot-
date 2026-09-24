@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const { Client, GatewayIntentBits, Collection, REST, Routes, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits } = require('discord.js');
-const { getVoiceConnection } = require('@discordjs/voice');
 const translate = require('translate-google-api');
 require('dotenv').config();
 
@@ -16,7 +15,7 @@ const client = new Client({
 });
 
 client.commands = new Collection();
-client.musicQueues = new Map(); // Fixed: Initialized music queues map here
+client.musicQueues = new Map();
 const commandsArray = [];
 
 // Configurations & Channel IDs
@@ -43,7 +42,7 @@ async function getOrCreateVerifiedRole(guild) {
     return role;
 }
 
-// Recursive function to load commands from subfolders (like commands/utility/)
+// Recursive function to load commands from subfolders
 const loadCommands = (dir) => {
     const files = fs.readdirSync(dir);
     for (const file of files) {
@@ -84,7 +83,7 @@ client.once('ready', async () => {
         );
         console.log('Successfully reloaded application slash commands.');
     } catch (error) {
-        console.error(error);
+        console.error('Command registration error:', error);
     }
 });
 
