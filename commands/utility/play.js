@@ -1,97 +1,15 @@
-const { SlashCommandBuilder } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const play = require('play-dl');
 
-const musicQueues = new Map();
-
-module.exports = {
-    name: 'play',
-    description: 'Play music from YouTube or Spotify link/query',
-    musicQueues: musicQueues,
-    data: new SlashCommandBuilder()
-        .setName('play')
-        .setDescription('Play music from YouTube or Spotify link/query')
-        .addStringOption(option =>
-            option.setName('song')
-                .setDescription('The song name or URL (YouTube / Spotify)')
-                .setRequired(true)),
-    
-    async execute(interactionOrMessage, args) {
-        let interaction = interactionOrMessage;
-        let guild = interaction.guild;
-        let member = interaction.member;
-        let channel = interaction.channel;
-
-        // Support both slash command and text prefix (!play)
-        let songQuery = '';
-        const isSlash = interaction.isChatInputCommand?.() || false;
-
-        if (isSlash) {
-            songQuery = interaction.options.getString('song');
-            await interaction.deferReply();
-        } else {
-            songQuery = args ? args.join(' ') : '';
-        }
-
-        if (!member?.voice.channel) {
-            const replyMsg = '❌ You need to be in a voice channel to play music!';
-            if (isSlash) return interaction.editReply(replyMsg);
-            return interaction.reply(replyMsg);
-        }
-
-        if (!songQuery) {
-            const replyMsg = '❌ Please provide a song name or link.';
-            if (isSlash) return interaction.editReply(replyMsg);
-            return interaction.reply(replyMsg);
-        }
-
-        const voiceChannel = member.voice.channel;
-        let serverQueue = musicQueues.get(guild.id);
-
-        if (!serverQueue) {
-            const connection = joinVoiceChannel({
-                channelId: voiceChannel.id,
-                guildId: guild.id,
-                adapterCreator: guild.voiceAdapterCreator,
-            });
-            const player = createAudioPlayer();
-            serverQueue = { textChannel: channel, voiceChannel, connection, player, songs: [] };
-            musicQueues.set(guild.id, serverQueue);
-            connection.subscribe(player);
-
-            player.on(AudioPlayerStatus.Idle, () => {
-                serverQueue.songs.shift();
-                playSong(guild.id, serverQueue.songs[0]);
-            });
-        }
-
-        serverQueue.songs.push({ title: songQuery, url: songQuery });
-
-        if (serverQueue.songs.length === 1) {
-            if (isSlash) {
-                await interaction.editReply(`🎵 Loading song...`);
-            } else {
-                await interaction.reply(`🎵 Loading song...`);
-            }
-            playSong(guild.id, serverQueue.songs[0]);
-        } else {
-            const msg = `📥 Added to queue: **${songQuery}**`;
-            if (isSlash) {
-                await interaction.editReply(msg);
-            } else {
-                await interaction.reply(msg);
-            }
-        }
-    }
-};
-
-async function playSong(guildId, song) {
-    const serverQueue = musicQueues.get(guildId);
+// Helper function to play songs sequentially
+async function playSong(client, guildId, song) {
+    const serverQueue = client.musicQueues.get(guildId);
     if (!serverQueue || !song) return;
 
     try {
         let streamSource = song.url;
         
+        // Handle Spotify link search resolution
         if (play.is_spotify(song.url)) {
             const spotifyData = await play.spotify(song.url);
             const searched = await play.search(`${spotifyData.name} ${spotifyData.artists[0]?.name || ''}`, { limit: 1 });
@@ -100,7 +18,7 @@ async function playSong(guildId, song) {
             } else {
                 serverQueue.textChannel.send('❌ Could not find a playable source for this Spotify track.').catch(() => {});
                 serverQueue.songs.shift();
-                return playSong(guildId, serverQueue.songs[0]);
+                return playSong(client, guildId, serverQueue.songs[0]);
             }
         } else if (!song.url.startsWith('http')) {
             const searched = await play.search(song.url, { limit: 1 });
@@ -109,7 +27,7 @@ async function playSong(guildId, song) {
             } else {
                 serverQueue.textChannel.send('❌ No results found for your query.').catch(() => {});
                 serverQueue.songs.shift();
-                return playSong(guildId, serverQueue.songs[0]);
+                return playSong(client, guildId, serverQueue.songs[0]);
             }
         }
 
@@ -126,6 +44,53 @@ async function playSong(guildId, song) {
     } catch (error) {
         console.error('Playback stream error:', error);
         serverQueue.songs.shift();
-        playSong(guildId, serverQueue.songs[0]);
+        playSong(client, guildId, serverQueue.songs[0]);
     }
 }
+
+module.exports = {
+    name: 'play',
+    description: 'Play music from YouTube or Spotify link/query',
+    options: [{
+        name: 'song',
+        type: 3, // STRING type
+        description: 'The song name or URL (YouTube / Spotify)',
+        required: true
+    }],
+    async execute(interaction) {
+        const voiceChannel = interaction.member.voice.channel;
+        if (!voiceChannel) {
+            return interaction.reply({ content: '❌ You need to be in a voice channel to play music!', ephemeral: true });
+        }
+
+        const songQuery = interaction.options.getString('song');
+        await interaction.deferReply();
+
+        let serverQueue = interaction.client.musicQueues.get(interaction.guild.id);
+        
+        if (!serverQueue) {
+            const connection = joinVoiceChannel({
+                channelId: voiceChannel.id,
+                guildId: interaction.guild.id,
+                adapterCreator: interaction.guild.voiceAdapterCreator,
+            });
+            const player = createAudioPlayer();
+            serverQueue = { textChannel: interaction.channel, voiceChannel, connection, player, songs: [] };
+            interaction.client.musicQueues.set(interaction.guild.id, serverQueue);
+            connection.subscribe(player);
+
+            player.on(AudioPlayerStatus.Idle, () => {
+                serverQueue.songs.shift();
+                playSong(interaction.client, interaction.guild.id, serverQueue.songs[0]);
+            });
+        }
+
+        serverQueue.songs.push({ title: songQuery, url: songQuery });
+        if (serverQueue.songs.length === 1) {
+            await interaction.editReply(`🎵 Loading song...`);
+            playSong(interaction.client, interaction.guild.id, serverQueue.songs[0]);
+        } else {
+            await interaction.editReply(`📥 Added to queue: **${songQuery}**`);
+        }
+    },
+};
