@@ -64,5 +64,21 @@ module.exports = {
             }
             return;
         }
+
+        // Free AI Chat Feature (Works in all channels without prefix, no API key needed)
+        try {
+            // Typing indicator show karega taake lage bot soch raha hai
+            await message.channel.sendTyping();
+
+            const prompt = encodeURIComponent(message.content);
+            // Ek reliable free public AI endpoint use kiya gaya hai
+            const aiRes = await axios.get(`https://api.popcat.xyz/chatbot?msg=${prompt}`);
+            
+            if (aiRes.data && aiRes.data.response) {
+                await message.reply(aiRes.data.response);
+            }
+        } catch (error) {
+            console.error('AI Chat error:', error);
+        }
     },
 };
