@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, REST, Routes, ActivityType } = require('discord.js');
 require('dotenv').config();
 
 const client = new Client({
@@ -68,7 +68,7 @@ const loadEvents = (dir) => {
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 
-// Register Slash Commands Automatically on Startup (Guild-specific using panel GUILD_ID or Global)
+// Register Slash Commands Automatically on Startup & Set Rotating Custom Statuses
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
@@ -90,6 +90,25 @@ client.once('ready', async () => {
     } catch (error) {
         console.error('Command registration error:', error);
     }
+
+    // Configurazione dello stato personalizzato alternato (Visual Studio Code <-> Ubuntu/Linux)
+    const statuses = [
+        { name: 'Visual Studio Code', type: ActivityType.Custom, state: 'Visual Studio Code' },
+        { name: 'Ubuntu/Linux', type: ActivityType.Custom, state: 'Ubuntu/Linux' }
+    ];
+
+    let index = 0;
+    // Imposta subito il primo stato all'avvio
+    client.user.setPresence({ activities: [statuses[index]], status: 'online' });
+
+    // Cambia lo stato ogni 10 secondi (10000 ms)
+    setInterval(() => {
+        index = (index + 1) % statuses.length;
+        client.user.setPresence({
+            activities: [statuses[index]],
+            status: 'online',
+        });
+    }, 10000);
 });
 
 client.login(process.env.DISCORD_TOKEN);
