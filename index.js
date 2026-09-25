@@ -68,7 +68,7 @@ const loadEvents = (dir) => {
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 
-// Register Slash Commands Automatically on Startup & Set Rotating Custom Statuses
+// Register Slash Commands Automatically on Startup & Set Rotating Playing Statuses Every 30 Minutes
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
@@ -91,24 +91,26 @@ client.once('ready', async () => {
         console.error('Command registration error:', error);
     }
 
-    // Configurazione dello stato personalizzato alternato (Visual Studio Code <-> Ubuntu/Linux)
+    // Yahan humne ActivityType.Playing use kiya hai taaki icon/app style mein show ho
     const statuses = [
-        { name: 'Visual Studio Code', type: ActivityType.Custom, state: 'Visual Studio Code' },
-        { name: 'Ubuntu/Linux', type: ActivityType.Custom, state: 'Ubuntu/Linux' }
+        { name: 'Visual Studio Code', type: ActivityType.Playing },
+        { name: 'Ubuntu/Linux', type: ActivityType.Playing },
+        { name: 'The Syndicate - Community Bot', type: ActivityType.Playing }
     ];
 
     let index = 0;
-    // Imposta subito il primo stato all'avvio
+    // Bot start hote hi pehla status set ho jayega
     client.user.setPresence({ activities: [statuses[index]], status: 'online' });
 
-    // Cambia lo stato ogni 10 secondi (10000 ms)
+    // Har 30 minutes baad status automatically change hoga (30 * 60 * 1000 ms)
     setInterval(() => {
         index = (index + 1) % statuses.length;
         client.user.setPresence({
             activities: [statuses[index]],
             status: 'online',
         });
-    }, 10000);
+        console.log(`🔄 Bot status updated to playing: ${statuses[index].name}`);
+    }, 30 * 60 * 1000);
 });
 
 client.login(process.env.DISCORD_TOKEN);
