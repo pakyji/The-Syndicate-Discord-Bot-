@@ -9,11 +9,11 @@ async function updateOrCreateServerStats(guild) {
             statsChannel = await guild.channels.create({
                 name: `📊 Members: ${guild.memberCount}`,
                 type: ChannelType.GuildVoice,
-                position: 0, // Server ke bilkul top par rakhne ke liye
+                position: 0,
                 permissionOverwrites: [
                     {
                         id: guild.id,
-                        deny: [PermissionFlagsBits.Connect], // Koi voice channel mein join na kar sake
+                        deny: [PermissionFlagsBits.Connect],
                     },
                 ],
             });
@@ -35,7 +35,7 @@ module.exports = {
             // 1. Update or Create Server Stats at the Top
             await updateOrCreateServerStats(member.guild);
 
-            // 2. Send Public Welcome Message (Channel ID: 901709300383227934)
+            // 2. Send Public Welcome Message
             const welcomeChannelId = '901709300383227934';
             const welcomeChannel = member.guild.channels.cache.get(welcomeChannelId);
             
