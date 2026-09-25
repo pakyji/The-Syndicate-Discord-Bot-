@@ -36,6 +36,7 @@ module.exports = {
                 await message.delete();
 
                 const userId = message.author.id;
+                if (!client.autoWarnings) client.autoWarnings = new Map();
                 const currentWarns = (client.autoWarnings.get(userId) || 0) + 1;
                 client.autoWarnings.set(userId, currentWarns);
 
@@ -65,17 +66,20 @@ module.exports = {
             return;
         }
 
-        // Free AI Chat Feature (Works in all channels without prefix, no API key needed)
+        // Free AI Chat Feature (Works ONLY when the bot is mentioned)
         try {
-            // Typing indicator show karega taake lage bot soch raha hai
-            await message.channel.sendTyping();
+            if (message.mentions.has(client.user)) {
+                await message.channel.sendTyping();
 
-            const prompt = encodeURIComponent(message.content);
-            // Ek reliable free public AI endpoint use kiya gaya hai
-            const aiRes = await axios.get(`https://api.popcat.xyz/chatbot?msg=${prompt}`);
-            
-            if (aiRes.data && aiRes.data.response) {
-                await message.reply(aiRes.data.response);
+                const cleanContent = message.content.replace(/<@!?\d+>/g, '').trim();
+                if (!cleanContent) return;
+
+                const prompt = encodeURIComponent(cleanContent);
+                const aiRes = await axios.get(`https://api.popcat.xyz/chatbot?msg=${prompt}`);
+                
+                if (aiRes.data && aiRes.data.response) {
+                    await message.reply(aiRes.data.response);
+                }
             }
         } catch (error) {
             console.error('AI Chat error:', error);
