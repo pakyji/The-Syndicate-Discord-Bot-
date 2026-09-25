@@ -1,10 +1,18 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 
 module.exports = {
-    name: 'ban',
-    category: 'Moderation',
-    description: 'Ban a member from the server',
+    // Usiamo SlashCommandBuilder per definire chiaramente il nome, la descrizione e le opzioni
+    data: new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('Ban a member from the server')
+        .addUserOption(option =>
+            option.setName('target')
+                .setDescription('The user to ban')
+                .setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+
     async execute(ctx) {
+        // Gestione sia per Slash che per Prefissi normali
         const isSlash = ctx.isChatInputCommand && ctx.isChatInputCommand();
 
         if (!ctx.member.permissions.has(PermissionFlagsBits.BanMembers)) {
@@ -14,7 +22,10 @@ module.exports = {
                 : await ctx.reply(errReply);
         }
 
-        const target = ctx.options ? ctx.options.getUser('target') : null;
+        const target = isSlash 
+            ? ctx.options.getUser('target') 
+            : ctx.mentions.users.first();
+
         if (!target) {
             const errReply = 'Please specify a user to ban.';
             return isSlash 
