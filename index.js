@@ -17,7 +17,7 @@ client.commands = new Collection();
 client.musicQueues = new Map();
 client.autoWarnings = new Map();
 
-// 1. Dynamic Command Loader (Recursively scans 'commands/' folder)
+// 1. Dynamic Command Loader (Strict validation to skip undefined/invalid commands)
 const commandsArray = [];
 const loadCommands = (dir) => {
     const files = fs.readdirSync(dir);
@@ -28,17 +28,19 @@ const loadCommands = (dir) => {
         } else if (file.endsWith('.js')) {
             const command = require(filePath);
             
-            // Support for both SlashCommandBuilder (.data) and direct .name
             const commandData = command.data ? command.data.toJSON() : command;
             const commandName = command.data ? command.data.name : command.name;
 
-            if (commandName && (command.execute || command.run)) {
+            // Strict check: Only valid string names and executable commands are allowed
+            if (commandName && commandName !== 'undefined' && typeof commandName === 'string' && (command.execute || command.run)) {
                 client.commands.set(commandName, command);
                 commandsArray.push({
                     name: commandName,
                     description: commandData.description || 'No description provided',
                     options: commandData.options || []
                 });
+            } else {
+                console.log(`⚠️ Skipped invalid or undefined command file: ${file}`);
             }
         }
     }
@@ -68,11 +70,11 @@ const loadEvents = (dir) => {
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 
-// Register Slash Commands Automatically on Startup & Set Rotating Playing Statuses Every 30 Minutes
+// Register Slash Commands Automatically on Startup with Deduplication & Status Rotation
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        // Remove duplicate commands to prevent double listing
+        // Remove any duplicate commands before registering
         const uniqueCommandsArray = Array.from(
             new Map(commandsArray.map(cmd => [cmd.name, cmd])).values()
         );
