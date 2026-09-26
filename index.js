@@ -17,7 +17,7 @@ client.commands = new Collection();
 client.musicQueues = new Map();
 client.autoWarnings = new Map();
 
-// 1. Dynamic Command Loader (Strict validation to skip undefined/invalid commands)
+// 1. Dynamic Command Loader with Strict Validation (Blocks /undefined & invalid commands)
 const commandsArray = [];
 const loadCommands = (dir) => {
     const files = fs.readdirSync(dir);
@@ -31,7 +31,7 @@ const loadCommands = (dir) => {
             const commandData = command.data ? command.data.toJSON() : command;
             const commandName = command.data ? command.data.name : command.name;
 
-            // Strict check: Only valid string names and executable commands are allowed
+            // Strict filter: Only valid command names and executable functions allowed
             if (commandName && commandName !== 'undefined' && typeof commandName === 'string' && (command.execute || command.run)) {
                 client.commands.set(commandName, command);
                 commandsArray.push({
@@ -40,7 +40,7 @@ const loadCommands = (dir) => {
                     options: commandData.options || []
                 });
             } else {
-                console.log(`⚠️ Skipped invalid or undefined command file: ${file}`);
+                console.log(`⚠️ Skipped invalid/undefined command file: ${file}`);
             }
         }
     }
@@ -49,7 +49,7 @@ const loadCommands = (dir) => {
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) loadCommands(commandsPath);
 
-// 2. Dynamic Event/Interaction Loader (Recursively scans 'events/' folder)
+// 2. Dynamic Event/Interaction Loader
 const loadEvents = (dir) => {
     const files = fs.readdirSync(dir);
     for (const file of files) {
@@ -70,11 +70,11 @@ const loadEvents = (dir) => {
 const eventsPath = path.join(__dirname, 'events');
 if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 
-// Register Slash Commands Automatically on Startup with Deduplication & Status Rotation
+// Register Slash Commands with Deduplication on Startup
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
-        // Remove any duplicate commands before registering
+        // Remove duplicate commands to prevent double listing in Discord
         const uniqueCommandsArray = Array.from(
             new Map(commandsArray.map(cmd => [cmd.name, cmd])).values()
         );
@@ -84,7 +84,7 @@ client.once('ready', async () => {
                 Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
                 { body: uniqueCommandsArray },
             );
-            console.log('✅ Commands successfully registered instantly in your guild using GUILD_ID from panel!');
+            console.log('✅ Commands successfully registered instantly in your guild using GUILD_ID!');
         } else {
             await rest.put(
                 Routes.applicationCommands(client.user.id),
@@ -93,7 +93,7 @@ client.once('ready', async () => {
             console.log('✅ Commands successfully registered globally!');
         }
 
-        console.log('✅ The Syndicate bot is online with Zero-Touch Modular Architecture!');
+        console.log('✅ The Syndicate bot is online and fully cleaned!');
     } catch (error) {
         console.error('Command registration error:', error);
     }
