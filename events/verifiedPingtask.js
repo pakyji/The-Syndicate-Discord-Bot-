@@ -4,7 +4,7 @@ module.exports = {
     name: Events.ClientReady,
     once: true,
     execute(client) {
-        const TARGET_CHANNEL_ID = '899366913086455828'; // Your target channel ID
+        const TARGET_CHANNEL_ID = '1552721386244407357'; // Your target channel ID
         const VERIFIED_ROLE_NAME = 'Verified';
         
         // List of funny messages
