@@ -72,16 +72,21 @@ if (fs.existsSync(eventsPath)) loadEvents(eventsPath);
 client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
     try {
+        // Remove duplicate commands to prevent double listing
+        const uniqueCommandsArray = Array.from(
+            new Map(commandsArray.map(cmd => [cmd.name, cmd])).values()
+        );
+
         if (process.env.GUILD_ID) {
             await rest.put(
                 Routes.applicationGuildCommands(client.user.id, process.env.GUILD_ID),
-                { body: commandsArray },
+                { body: uniqueCommandsArray },
             );
             console.log('✅ Commands successfully registered instantly in your guild using GUILD_ID from panel!');
         } else {
             await rest.put(
                 Routes.applicationCommands(client.user.id),
-                { body: commandsArray },
+                { body: uniqueCommandsArray },
             );
             console.log('✅ Commands successfully registered globally!');
         }
@@ -91,7 +96,6 @@ client.once('ready', async () => {
         console.error('Command registration error:', error);
     }
 
-    // Yahan humne ActivityType.Playing use kiya hai taaki icon/app style mein show ho
     const statuses = [
         { name: 'Visual Studio Code', type: ActivityType.Playing },
         { name: 'Ubuntu/Linux', type: ActivityType.Playing },
@@ -99,10 +103,8 @@ client.once('ready', async () => {
     ];
 
     let index = 0;
-    // Bot start hote hi pehla status set ho jayega
     client.user.setPresence({ activities: [statuses[index]], status: 'online' });
 
-    // Har 30 minutes baad status automatically change hoga (30 * 60 * 1000 ms)
     setInterval(() => {
         index = (index + 1) % statuses.length;
         client.user.setPresence({
