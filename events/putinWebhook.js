@@ -1,53 +1,59 @@
-const { Events } = require('discord.js');
-const { WebhookClient } = require('discord.js');
+const { Events, WebhookClient } = require('discord.js');
+const { GoogleGenAI } = require('@google/genai');
 
-// Nayi Target Channel ID yahan update kar di gayi hai
 const TARGET_CHANNEL_ID = '1536500109154451618';
 
+// Webhook configuration
 const webhookClient = new WebhookClient({ 
     url: 'https://discord.com/api/webhooks/1553455616851185757/-ewfr1--4bpIjrBS5so7hHXr0k4Kc9dNYiSzYVkMSurldv3hrRDTNoUh-y3JrLN3tM06' 
 });
+
+// Initialize Google Gen AI using the environment variable from your panel
+// (Make sure your panel variable name matches, e.g., process.env.API_KEY or process.env.GEMINI_API_KEY)
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 module.exports = {
     name: Events.MessageCreate,
     async execute(message) {
         if (message.author.bot || !message.guild) return;
-        
-        // Sirf naye target channel par hi check karega
         if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
         const isMentioned = message.mentions.has(message.client.user);
         const hasKeyword = message.content.toLowerCase().includes('putin');
 
         if (isMentioned || hasKeyword) {
+            // Clean message to extract user query
             let userText = message.content
                 .replace(/<@!?[0-9>]+/g, '')
+                .replace(/@vladimir/gi, '')
                 .replace(/putin/gi, '')
-                .trim()
-                .toLowerCase();
+                .trim();
 
-            let aiResponse = "";
-
-            if (userText.includes('hi') || userText.includes('hello') || userText.includes('hey')) {
-                aiResponse = "Greetings. State your business clearly and concisely.";
-            } else if (userText.includes('how are you') || userText.includes('kese ho')) {
-                aiResponse = "The state of affairs is strong, stable, and completely under control.";
-            } else if (userText.includes('what are you doing') || userText.includes('kya kar rahe ho')) {
-                aiResponse = "Monitoring global developments and calculating our next strategic moves.";
-            } else if (userText.includes('economy') || userText.includes('money') || userText.includes('coins')) {
-                aiResponse = "Our financial strategy is unshakeable. Focus on productivity and resource management.";
-            } else if (userText.length > 2) {
-                aiResponse = `Regarding your query about "${userText}": Our position is firm, and all parameters are being evaluated.`;
-            } else {
-                aiResponse = "Speak with purpose. What is your strategic objective?";
+            if (!userText) {
+                userText = "Hello";
             }
 
             try {
+                // Generate a real AI response acting strictly as Vladimir Putin
+                const response = await ai.models.generateContent({
+                    model: 'gemini-2.5-flash',
+                    contents: userText,
+                    config: {
+                        systemInstruction: "You are Vladimir Putin. Respond dynamically, intelligently, and strictly in character with a sharp, calculating, and authoritative tone. Keep responses concise and impactful for a Discord chat."
+                    }
+                });
+
+                const aiReply = response.text || "State your business clearly.";
+
+                // Send via Webhook
                 await webhookClient.send({
-                    content: `🇷🇺 **Vladimir Putin:** ${aiResponse}`
+                    content: `🇷🇺 **Vladimir Putin:** ${aiReply}`
                 });
             } catch (error) {
-                console.error('Error sending webhook message:', error);
+                console.error('Error generating AI response:', error);
+                await webhookClient.send({
+                    content: `🇷🇺 **Vladimir Putin:** Technical difficulties are being addressed.`
+                });
             }
         }
     },
