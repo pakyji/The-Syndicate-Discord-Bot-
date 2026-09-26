@@ -8,9 +8,8 @@ const webhookClient = new WebhookClient({
     url: 'https://discord.com/api/webhooks/1553455616851185757/-ewfr1--4bpIjrBS5so7hHXr0k4Kc9dNYiSzYVkMSurldv3hrRDTNoUh-y3JrLN3tM06' 
 });
 
-// Initialize Google Gen AI using the environment variable from your panel
-// (Make sure your panel variable name matches, e.g., process.env.API_KEY or process.env.GEMINI_API_KEY)
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Using your panel's GEMINI_API_KEY variable
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 module.exports = {
     name: Events.MessageCreate,
@@ -22,7 +21,6 @@ module.exports = {
         const hasKeyword = message.content.toLowerCase().includes('putin');
 
         if (isMentioned || hasKeyword) {
-            // Clean message to extract user query
             let userText = message.content
                 .replace(/<@!?[0-9>]+/g, '')
                 .replace(/@vladimir/gi, '')
