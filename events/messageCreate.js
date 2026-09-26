@@ -1,7 +1,8 @@
 const axios = require('axios');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 
 const TRANSLATION_CHANNEL_ID = '1538595475794563167';
+const ALERT_CHANNEL_ID = '902047746624749588';
 
 // Define the allowed channel IDs where images are permitted
 const ALLOWED_IMAGE_CHANNELS = [
@@ -16,10 +17,36 @@ module.exports = {
     async execute(message, client) {
         if (message.author.bot || !message.guild) return;
 
+        // 1. Mass Mention / Raid Detection (@everyone or @here)
+        if (message.mentions.everyone) {
+            try {
+                await message.delete();
+                
+                const warningMsg = await message.channel.send({
+                    content: `⚠️ <@${message.author.id}>, '@everyone' or '@here' mentions are restricted to prevent raids!`
+                });
+                setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
+
+                const alertChannel = message.guild.channels.cache.get(ALERT_CHANNEL_ID);
+                if (alertChannel) {
+                    const raidEmbed = new EmbedBuilder()
+                        .setColor('#FFA500')
+                        .setTitle('🚨 Raid / Mass Mention Alert')
+                        .setDescription(`**User:** <@${message.author.id}>\n**Channel:** <#${message.channel.id}>\n**Action:** Tried using '@everyone' / '@here'. Message deleted.`)
+                        .setTimestamp();
+
+                    await alertChannel.send({ embeds: [raidEmbed] });
+                }
+            } catch (err) {
+                console.error('Raid detector error:', err);
+            }
+            return;
+        }
+
         // Allow administrators or moderators to bypass anti-image restrictions
         const isAdminOrMod = message.member.permissions.has(PermissionFlagsBits.Administrator);
 
-        // Anti-Image Filter Feature
+        // 2. Anti-Image Filter Feature
         if (!isAdminOrMod) {
             const hasAttachment = message.attachments.size > 0;
             const hasEmbedImage = message.embeds.some(embed => embed.image || embed.thumbnail);
@@ -43,7 +70,7 @@ module.exports = {
             }
         }
 
-        // Translation Feature
+        // 3. Translation Feature
         if (message.channel.id === TRANSLATION_CHANNEL_ID) {
             try {
                 const encodedText = encodeURIComponent(message.content);
@@ -60,7 +87,7 @@ module.exports = {
             return;
         }
 
-        // Automatic Moderation Filter (Bad words & Links)
+        // 4. Automatic Moderation Filter (Bad words & Links)
         const badWords = ['parolaccia1', 'parolaccia2'];
         const contentLower = message.content.toLowerCase();
         const hasBadWord = badWords.some(word => contentLower.includes(word));
