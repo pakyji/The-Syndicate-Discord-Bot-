@@ -39,7 +39,7 @@ module.exports = {
                 .addFields(
                     { name: 'Banned User', value: `${targetUser.tag} (${targetUser.id})`, inline: true },
                     { name: 'Banned By', value: `${interaction.user.tag}`, inline: true },
-                    { name: 'Reason', value: reason, false: true }
+                    { name: 'Reason', value: reason }
                 )
                 .setTimestamp();
 
