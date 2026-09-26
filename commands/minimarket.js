@@ -11,19 +11,18 @@ function saveCoinsData(data) {
     fs.writeFileSync(path, JSON.stringify(data, null, 2));
 }
 
-// Badi Mini Market Inventory (Lidl/Coop/Conad/Eurospar Style)
 const marketItems = {
-    // Snacks & Drinks
+    // Snacks & Refreshments
     "coffee": { name: "☕ Hot Espresso", price: 30, type: "item", desc: "Fresh Italian coffee to stay active!" },
     "energy": { name: "⚡ Energy Drink", price: 50, type: "item", desc: "Boost your chat energy!" },
     "pizza": { name: "🍕 Slice of Pizza", price: 80, type: "item", desc: "Delicious cheesy Italian pizza slice." },
     "snacks": { name: "🍿 Movie Popcorn", price: 100, type: "item", desc: "Crunchy snacks for gaming nights." },
     
-    // Fun & Mystery
+    // Fun & Mystery Items
     "scratch": { name: "🎟️ Lucky Scratch Card", price: 150, type: "item", desc: "Scratch to win random coins back!" },
     "mystery": { name: "🎁 Super Mystery Box", price: 300, type: "item", desc: "Contains a massive coin jackpot!" },
     
-    // Server Roles
+    // Exclusive Roles
     "vip": { name: "⭐ VIP Role", price: 500, type: "role", roleName: "VIP", desc: "Get the exclusive VIP role badge." },
     "legend": { name: "🔥 Legend Role", price: 1000, type: "role", roleName: "Legend", desc: "The ultimate flex role on the server." }
 };
@@ -63,7 +62,7 @@ module.exports = {
 
         if (subcommand === 'view') {
             const embed = new EmbedBuilder()
-                .setColor('#e67e22') // Supermarket warm orange/green vibe
+                .setColor('#e67e22')
                 .setTitle('🛒 Hyper Mini Market (Coop, Lidl, Conad & Eurospar)')
                 .setDescription('Welcome! Use `/minimarket buy [item]` to purchase food, items, or special roles using your coins.')
                 .addFields(
@@ -97,23 +96,20 @@ module.exports = {
                 return await interaction.reply({ content: '❌ Invalid product selected!', ephemeral: true });
             }
 
-            // Check if user has enough coins
             if (userCoins < item.price) {
                 return await interaction.reply({ 
-                    content: `❌ Aapke paas itne coins nahi hain! Aapko **${item.price}** coins chahiye, lekin aapke paas sirf **${userCoins}** coins hain.`, 
+                    content: `❌ You do not have enough coins! You need **${item.price}** coins, but you only have **${userCoins}** coins.`, 
                     ephemeral: true 
                 });
             }
 
-            // Deduct coins
             coinsData[userId] -= item.price;
 
-            // Handle Roles
             if (item.type === 'role') {
                 const role = interaction.guild.roles.cache.find(r => r.name === item.roleName);
                 if (!role) {
                     return await interaction.reply({ 
-                        content: `⚠️ Error: Server mein **"${item.roleName}"** naam ka role nahi mila. Admin se kahein pehle role banayein!`, 
+                        content: `⚠️ Error: The role **"${item.roleName}"** does not exist in this server. Please ask an admin to create it first!`, 
                         ephemeral: true 
                     });
                 }
@@ -122,32 +118,31 @@ module.exports = {
                     await interaction.member.roles.add(role);
                     saveCoinsData(coinsData);
                     return await interaction.reply({ 
-                        content: `🎉 Mubarak ho! Aapne **${item.name}** successfully kharid liya hai aur role aapko mil gaya hai! 🛒✨`, 
+                        content: `🎉 Success! You have successfully purchased **${item.name}** and received the role! 🛒✨`, 
                         ephemeral: true 
                     });
                 } catch (error) {
                     console.error(error);
-                    return await interaction.reply({ content: '❌ Role assign karne mein error aayi. Check karein ki bot ka role upar hai ya nahi.', ephemeral: true });
+                    return await interaction.reply({ content: '❌ Failed to assign the role. Please check bot permissions and role hierarchy.', ephemeral: true });
                 }
             } 
             
-            // Handle Fun Inventory Items / Gambling Mini-games
             else if (item.type === 'item') {
                 let extraMsg = '';
 
                 if (itemKey === 'scratch') {
-                    const winCoins = Math.floor(Math.random() * 250) + 50; // Win between 50 to 300 back
+                    const winCoins = Math.floor(Math.random() * 250) + 50;
                     coinsData[userId] += winCoins;
-                    extraMsg = ` 🎟️ Scratch card kholne par aapne **${winCoins} coins** jeet liye!`;
+                    extraMsg = ` 🎟️ You scratched the card and won **${winCoins} coins** back!`;
                 } else if (itemKey === 'mystery') {
-                    const jackpot = Math.floor(Math.random() * 600) + 150; // Win between 150 to 750 back
+                    const jackpot = Math.floor(Math.random() * 600) + 150;
                     coinsData[userId] += jackpot;
-                    extraMsg = ` 🎁 Jackpot! Mystery Box kholne par aapko **${jackpot} coins** ka bada inaam mila!`;
+                    extraMsg = ` 🎁 Jackpot! Opening the Mystery Box rewarded you with **${jackpot} coins**!`;
                 }
 
                 saveCoinsData(coinsData);
                 return await interaction.reply({ 
-                    content: `🎉 Success! Aapne market se **${item.name}** kharid liya hai!${extraMsg} 🛒🛍️`, 
+                    content: `🎉 Success! You bought **${item.name}** from the market!${extraMsg} 🛒🛍️`, 
                     ephemeral: true 
                 });
             }
