@@ -102,24 +102,5 @@ module.exports = {
             }
             return;
         }
-
-        // Free AI Chat Feature (Works ONLY when the bot is mentioned)
-        try {
-            if (message.mentions.has(client.user)) {
-                await message.channel.sendTyping();
-
-                const cleanContent = message.content.replace(/<@!?\d+>/g, '').trim();
-                if (!cleanContent) return;
-
-                const prompt = encodeURIComponent(cleanContent);
-                const aiRes = await axios.get(`https://api.popcat.xyz/chatbot?msg=${prompt}`);
-                
-                if (aiRes.data && aiRes.data.response) {
-                    await message.reply(aiRes.data.response);
-                }
-            }
-        } catch (error) {
-            console.error('AI Chat error:', error);
-        }
     },
 };
