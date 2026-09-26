@@ -1,7 +1,7 @@
 const { Events } = require('discord.js');
 const { WebhookClient } = require('discord.js');
 
-const TARGET_CHANNEL_ID = '899366913086455828';
+const TARGET_CHANNEL_ID = '1536500109154451618';
 
 // Configured Webhook Client with your URL
 const webhookClient = new WebhookClient({ 
