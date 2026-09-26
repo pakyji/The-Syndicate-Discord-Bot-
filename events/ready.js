@@ -20,20 +20,20 @@ module.exports = {
         console.log('Invite tracker cache initialized successfully!');
 
         // 2. Automatic Coin Drop System
-        const TARGET_CHANNEL_ID = '1536498743505846393'; // Aapka diya hua target channel
-        const DROP_INTERVAL = 30 * 60 * 1000; // Har 30 minutes mein automatic drop
+        const TARGET_CHANNEL_ID = '1536498743505846393'; // Target channel ID for auto drops
+        const DROP_INTERVAL = 30 * 60 * 1000; // Automatic drop every 30 minutes
 
         setInterval(async () => {
             try {
                 const channel = await client.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
                 if (!channel) return;
 
-                const amount = Math.floor(Math.random() * 100) + 50; // Random 50 se 150 coins
+                const amount = Math.floor(Math.random() * 100) + 50; // Random amount between 50 and 150 coins
 
                 const embed = new EmbedBuilder()
                     .setColor('#FFD700')
                     .setTitle('🪙 Automatic Coin Drop!')
-                    .setDescription(`**${amount} Coins** zameen par gir chuke hain!\nNeeche diye gaye button par click karke sabse pehle claim karo!`)
+                    .setDescription(`**${amount} Coins** have dropped on the ground!\nClick the button below to claim them first!`)
                     .setFooter({ text: 'The Syndicate Auto Drop' })
                     .setTimestamp();
 
@@ -47,13 +47,13 @@ module.exports = {
 
                 const message = await channel.send({ embeds: [embed], components: [row] });
 
-                // Button collector for 30 seconds
+                // Button collector active for 30 seconds
                 const collector = message.createMessageComponentCollector({ time: 30000 });
                 let claimed = false;
 
                 collector.on('collect', async i => {
                     if (claimed) {
-                        return i.reply({ content: '❌ Yeh coins koi aur pehle hi utha chuka hai!', ephemeral: true });
+                        return i.reply({ content: '❌ These coins have already been claimed by someone else!', ephemeral: true });
                     }
 
                     claimed = true;
@@ -61,7 +61,7 @@ module.exports = {
                     const winnerEmbed = new EmbedBuilder()
                         .setColor('#00FF00')
                         .setTitle('🪙 Coin Drop Claimed!')
-                        .setDescription(`🎉 **${i.user}** ne sabse pehle **${amount} Coins** grab kar liye hain!`)
+                        .setDescription(`🎉 **${i.user}** was the first to grab **${amount} Coins**!`)
                         .setTimestamp();
 
                     const disabledRow = new ActionRowBuilder().addComponents(
@@ -80,7 +80,7 @@ module.exports = {
                         const expiredEmbed = new EmbedBuilder()
                             .setColor('#808080')
                             .setTitle('🪙 Coin Drop Expired')
-                            .setDescription('Kisi ne bhi time par coins claim nahi kiye, coins wapas chale gaye!');
+                            .setDescription('Nobody claimed the coins in time, the coins have vanished!');
 
                         const disabledRow = new ActionRowBuilder().addComponents(
                             new ButtonBuilder()
