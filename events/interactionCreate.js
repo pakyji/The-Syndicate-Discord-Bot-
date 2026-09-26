@@ -25,6 +25,52 @@ module.exports = {
     name: 'interactionCreate',
     async execute(interaction, client) {
         try {
+            // Reaction Role Button Handler (Dynamic auto-creation & toggle)
+            if (interaction.isButton() && interaction.customId.startsWith('role_')) {
+                const buttonKey = interaction.customId.replace('role_', '');
+                
+                let targetRoleName = '';
+                if (buttonKey === 'ps4') targetRoleName = 'PS4';
+                else if (buttonKey === 'ps5') targetRoleName = 'PS5';
+                else if (buttonKey === 'pc') targetRoleName = 'PC';
+                else if (buttonKey === 'pc_enhanced') targetRoleName = 'PC Enhanced';
+                else if (buttonKey === 'xbox') targetRoleName = 'X Box Series';
+                else if (buttonKey === 'switch') targetRoleName = 'Switch';
+                else if (buttonKey === 'mobile') targetRoleName = 'Mobile User';
+                else if (buttonKey === 'nongamer') targetRoleName = 'Non Gamer';
+
+                if (!targetRoleName) return;
+
+                // Check if role exists, otherwise create it automatically
+                let role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === targetRoleName.toLowerCase());
+                if (!role) {
+                    try {
+                        role = await interaction.guild.roles.create({
+                            name: targetRoleName,
+                            reason: 'Auto-created by reaction roles system'
+                        });
+                    } catch (error) {
+                        console.error(`Failed to create role ${targetRoleName}:`, error);
+                        return await interaction.reply({ content: '⚠️ Failed to create the role. Please check bot permissions.', ephemeral: true });
+                    }
+                }
+
+                const member = interaction.member;
+                try {
+                    if (member.roles.cache.has(role.id)) {
+                        await member.roles.remove(role.id);
+                        await interaction.reply({ content: `❌ Role **${role.name}** has been removed from you!`, ephemeral: true });
+                    } else {
+                        await member.roles.add(role.id);
+                        await interaction.reply({ content: `✅ Role **${role.name}** has been added to you!`, ephemeral: true });
+                    }
+                } catch (error) {
+                    console.error('Error toggling reaction role:', error);
+                    await interaction.reply({ content: '⚠️ Failed to update your roles. Make sure the bot role is positioned higher than the target roles.', ephemeral: true });
+                }
+                return;
+            }
+
             // Verification Buttons
             if (interaction.isButton() && interaction.customId.startsWith('verify_')) {
                 const platformKey = interaction.customId.replace('verify_', '');
