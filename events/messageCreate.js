@@ -1,10 +1,47 @@
 const axios = require('axios');
+const { PermissionFlagsBits } = require('discord.js');
+
 const TRANSLATION_CHANNEL_ID = '1538595475794563167';
+
+// Define the allowed channel IDs where images are permitted
+const ALLOWED_IMAGE_CHANNELS = [
+    '1536498743505846393',
+    '1536500109154451618',
+    '1535656663510417469',
+    '901702414896365628'
+];
 
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
         if (message.author.bot || !message.guild) return;
+
+        // Allow administrators or moderators to bypass anti-image restrictions
+        const isAdminOrMod = message.member.permissions.has(PermissionFlagsBits.Administrator);
+
+        // Anti-Image Filter Feature
+        if (!isAdminOrMod) {
+            const hasAttachment = message.attachments.size > 0;
+            const hasEmbedImage = message.embeds.some(embed => embed.image || embed.thumbnail);
+
+            if (hasAttachment || hasEmbedImage) {
+                const isAllowedChannel = ALLOWED_IMAGE_CHANNELS.includes(message.channel.id);
+
+                if (!isAllowedChannel) {
+                    try {
+                        await message.delete();
+                        const allowedMentions = ALLOWED_IMAGE_CHANNELS.map(id => `<#${id}>`).join(', ');
+                        const warningMsg = await message.channel.send(
+                            `❌ ${message.author}, images are only allowed in ${allowedMentions}!`
+                        );
+                        setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
+                        return;
+                    } catch (error) {
+                        console.error('Anti-image error:', error);
+                    }
+                }
+            }
+        }
 
         // Translation Feature
         if (message.channel.id === TRANSLATION_CHANNEL_ID) {
