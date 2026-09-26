@@ -12,11 +12,9 @@ module.exports = {
             }
 
             const categories = {};
-            // Use a Set to prevent duplicate commands from showing up in the embed
             const processedCommands = new Set();
 
             client.commands.forEach(cmd => {
-                // Support both SlashCommandBuilder (.data.name) and legacy (.name) formats
                 const commandName = cmd.data ? cmd.data.name : cmd.name;
                 const commandDesc = cmd.data ? cmd.data.description : (cmd.description || 'No description');
                 const cat = cmd.category || 'General';
@@ -33,10 +31,27 @@ module.exports = {
                 .setTitle('The Syndicate • Commands')
                 .setTimestamp();
 
-            // Populate categories dynamically into fields
+            // Populate categories dynamically with 1024 character safety split
             for (const [cat, cmds] of Object.entries(categories)) {
-                if (cmds.length > 0) {
-                    embed.addFields({ name: cat, value: cmds.join('\n'), inline: false });
+                if (cmds.length === 0) continue;
+
+                let currentChunk = '';
+                let chunkIndex = 1;
+                let fieldName = cat;
+
+                for (const cmdStr of cmds) {
+                    // Check if adding this command exceeds Discord's 1024 limit
+                    if ((currentChunk + '\n' + cmdStr).length > 1024) {
+                        embed.addFields({ name: fieldName, value: currentChunk.trim(), inline: false });
+                        currentChunk = cmdStr;
+                        fieldName = `${cat} (Part ${++chunkIndex})`;
+                    } else {
+                        currentChunk += (currentChunk ? '\n' : '') + cmdStr;
+                    }
+                }
+
+                if (currentChunk.trim().length > 0) {
+                    embed.addFields({ name: fieldName, value: currentChunk.trim(), inline: false });
                 }
             }
 
