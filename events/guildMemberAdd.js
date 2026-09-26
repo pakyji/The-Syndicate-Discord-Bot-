@@ -1,6 +1,9 @@
 const { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const VERIFIED_ROLE_NAME = 'Verified';
 
+// Global cache to store invite uses for tracking
+const invitesCache = global.invitesCache || new Map();
+
 async function updateOrCreateServerStats(guild) {
     let statsChannel = guild.channels.cache.find(c => c.name.startsWith('📊 Members:'));
     
@@ -32,6 +35,28 @@ module.exports = {
         console.log(`[DEBUG] Member joined event triggered for: ${member.user.tag}`);
         
         try {
+            // 0. Track Invites
+            let inviterText = 'Unknown / Direct Link';
+            try {
+                const guildInvites = await member.guild.invites.fetch();
+                const oldInvites = invitesCache.get(member.guild.id) || new Map();
+                
+                // Find which invite's usage count increased
+                const matchedInvite = guildInvites.find(inv => {
+                    const oldUses = oldInvites.get(inv.code) || 0;
+                    return inv.uses > oldUses;
+                });
+
+                if (matchedInvite && matchedInvite.inviter) {
+                    inviterText = `${matchedInvite.inviter.tag} (Invited using code: ${matchedInvite.code}, Total Uses: ${matchedInvite.uses})`;
+                }
+
+                // Update cache for this guild with latest uses
+                invitesCache.set(member.guild.id, new Map(guildInvites.map(inv => [inv.code, inv.uses])));
+            } catch (inviteError) {
+                console.error('Failed to track invite:', inviteError);
+            }
+
             // 1. Update or Create Server Stats at the Top
             await updateOrCreateServerStats(member.guild);
 
@@ -45,7 +70,10 @@ module.exports = {
                     .setTitle('👋 New Member Joined!')
                     .setDescription(`Welcome to **${member.guild.name}**, ${member}! We are glad to have you here.`)
                     .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-                    .addFields({ name: 'Total Members', value: `${member.guild.memberCount}`, inline: true })
+                    .addFields(
+                        { name: 'Total Members', value: `${member.guild.memberCount}`, inline: true },
+                        { name: 'Invited By', value: inviterText, inline: false }
+                    )
                     .setTimestamp();
 
                 await welcomeChannel.send({ embeds: [welcomeEmbed] }).catch((err) => {
@@ -86,7 +114,7 @@ module.exports = {
                 new ButtonBuilder().setCustomId('verify_ps4').setLabel('PS4').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
                 new ButtonBuilder().setCustomId('verify_ps5').setLabel('PS5').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
                 new ButtonBuilder().setCustomId('verify_pc').setLabel('PC').setStyle(ButtonStyle.Success).setEmoji('💻'),
-                new ButtonBuilder().setCustomId('verify_nongamer').setLabel('Non-Gamer').setStyle(ButtonStyle.Secondary).setEmoji('👤')
+                new ButtonBuilder().setCountry?.() || new ButtonBuilder().setCustomId('verify_nongamer').setLabel('Non-Gamer').setStyle(ButtonStyle.Secondary).setEmoji('👤')
             );
 
             await verificationChannel.send({ content: `Hey <@${member.id}>! Welcome to the server.`, embeds: [embed], components: [row] });
