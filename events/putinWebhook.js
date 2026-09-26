@@ -3,7 +3,7 @@ const { WebhookClient } = require('discord.js');
 
 const TARGET_CHANNEL_ID = '899366913086455828';
 
-// Configured Webhook Client with your provided URL
+// Configured Webhook Client with your URL
 const webhookClient = new WebhookClient({ 
     url: 'https://discord.com/api/webhooks/1553455616851185757/-ewfr1--4bpIjrBS5so7hHXr0k4Kc9dNYiSzYVkMSurldv3hrRDTNoUh-y3JrLN3tM06' 
 });
@@ -26,14 +26,15 @@ module.exports = {
         // Check if the message is in the target channel
         if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
-        // Check if the bot was mentioned/pinged
+        // Check if the bot was mentioned OR if 'putin' was typed
         const isMentioned = message.mentions.has(message.client.user);
+        const hasKeyword = message.content.toLowerCase().includes('putin');
 
-        if (isMentioned) {
+        if (isMentioned || hasKeyword) {
             const randomResponse = putinResponses[Math.floor(Math.random() * putinResponses.length)];
 
             try {
-                // Send message using the separate Webhook profile (Putin Name & Avatar)
+                // Send message using the separate Webhook profile
                 await webhookClient.send({
                     content: `🇷🇺 **Vladimir Putin:** ${randomResponse} (Responding to <@${message.author.id}>)`
                 });
