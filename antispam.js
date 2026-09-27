@@ -48,18 +48,28 @@ client.on('messageCreate', async (message) => {
             // Delete the excessive spam message
             await message.delete().catch(() => {});
 
-            // Send a temporary warning message in chat
+            // 1. Send a temporary warning message in the server chat
             const warning = await message.channel.send(`⚠️ **${message.author.username}**, please slow down! You are sending messages too fast.`);
-            
-            // Auto-delete the warning after 4 seconds to keep chat clean
             setTimeout(() => warning.delete().catch(() => {}), 4000);
 
-            // Optional: Timeout the user for 60 seconds to stop severe flooding
+            // 2. Send a Direct Message (DM) to the member
+            const dmEmbed = new EmbedBuilder()
+                .setColor(0xFF0000)
+                .setTitle('⚠️ Anti-Spam Warning')
+                .setDescription(`You have been temporarily **timed out for 60 seconds** in **${message.guild.name}** for sending messages too quickly.\n\n` +
+                    `*Please respect the chat rules and avoid flooding.*`)
+                .setTimestamp();
+
+            await message.author.send({ embeds: [dmEmbed] }).catch(() => {
+                // If user has DMs closed, catch the error silently so the script doesn't crash
+            });
+
+            // 3. Timeout the user for 60 seconds
             if (message.member && message.member.moderatable) {
                 await message.member.timeout(60 * 1000, 'Automated Anti-Spam: Message flooding').catch(() => {});
             }
 
-            // Reset their history array to prevent continuous spam triggering loops
+            // Reset their history array to prevent continuous spam loops
             userMessageHistory.set(userId, []);
 
         } catch (error) {
@@ -68,5 +78,5 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// Replace with your actual Discord Bot Token
-client.login('YOUR_DISCORD_BOT_TOKEN');
+// Automatically reads the token from your panel environment variables
+client.login(process.env.DISCORD_TOKEN);
