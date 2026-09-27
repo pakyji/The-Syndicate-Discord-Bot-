@@ -1,97 +1,91 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 
-// Path to the warnings JSON data file
-const warningsFilePath = path.join(__dirname, '../warnings.json');
+// Initialize an independent client for anti-spam monitoring
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildModeration
+    ]
+});
 
-// Function to load warnings data from the file
-function getWarningsData() {
-    if (!fs.existsSync(warningsFilePath)) return {};
-    try {
-        return JSON.parse(fs.readFileSync(warningsFilePath, 'utf8'));
-    } catch (e) {
-        return {};
+// Track message history and content for spam detection: Map<userId, { timestamps: [], lastContent: string, duplicateCount: number }>
+const userActivity = new Map();
+
+// Configuration limits
+const SPAM_LIMIT = 4;     // Max messages allowed...
+const TIME_WINDOW = 6000; // ...within 6 seconds
+
+client.once('ready', () => {
+    console.log(`[Anti-Spam & Anti-Flood Monitor] Running independently as ${client.user.tag}`);
+});
+
+client.on('messageCreate', async (message) => {
+    // Ignore bots, system messages, or DMs
+    if (message.author.bot || !message.guild) return;
+
+    // Allow admins/moderators to bypass anti-spam
+    if (message.member && message.member.permissions.has('ManageMessages')) return;
+
+    const userId = message.author.id;
+    const now = Date.now();
+    const content = message.content.trim();
+
+    if (!userActivity.has(userId)) {
+        userActivity.set(userId, { timestamps: [], lastContent: '', duplicateCount: 0 });
     }
-}
 
-// Function to save warnings data to the file
-function saveWarningsData(data) {
-    fs.writeFileSync(warningsFilePath, JSON.stringify(data, null, 2));
-}
+    const userData = userActivity.get(userId);
+    
+    // 1. Filter out timestamps older than the time window
+    userData.timestamps = userData.timestamps.filter(timestamp => now - timestamp < TIME_WINDOW);
+    userData.timestamps.push(now);
 
-module.exports = {
-    data: new SlashCommandBuilder()
-        .setName('warn')
-        .setDescription('Issue a warning to a member')
-        .addUserOption(option => 
-            option.setName('target')
-                .setDescription('The member to warn')
-                .setRequired(true))
-        .addStringOption(option => 
-            option.setName('reason')
-                .setDescription('Reason for the warning')
-                .setRequired(false))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+    // 2. Check for Duplicate Content Spam (Copy-paste spam like repeating the same text/mention)
+    if (content.length > 0 && userData.lastContent === content) {
+        userData.duplicateCount += 1;
+    } else {
+        userData.lastContent = content;
+        userData.duplicateCount = 1;
+    }
 
-    async execute(interaction) {
+    // Determine if spam criteria is met (either too fast or repeating same text 3+ times)
+    const isFastSpam = userData.timestamps.length > SPAM_LIMIT;
+    const isDuplicateSpam = userData.duplicateCount >= 3;
+
+    if (isFastSpam || isDuplicateSpam) {
         try {
-            // Safety check for guild context
-            if (!interaction.guild) {
-                return await interaction.reply({ content: '❌ This command can only be used inside a server.', ephemeral: true });
-            }
+            // Delete the excessive spam message
+            await message.delete().catch(() => {});
 
-            const target = interaction.options.getUser('target');
-            const reason = interaction.options.getString('reason') || 'No reason provided';
-            const guildId = interaction.guild.id;
+            // Send a temporary warning message in the server chat
+            const warning = await message.channel.send(`⚠️ **${message.author.username}**, please stop spamming or flooding the chat!`);
+            setTimeout(() => warning.delete().catch(() => {}), 4000);
 
-            // Safety check for target user
-            if (!target) {
-                return await interaction.reply({ content: '❌ Could not find the specified user to warn.', ephemeral: true });
-            }
-
-            // Load existing warnings data
-            let warningsData = getWarningsData();
-            if (!warningsData[guildId]) warningsData[guildId] = {};
-            if (!warningsData[guildId][target.id]) warningsData[guildId][target.id] = 0;
-
-            // Increment the warning count
-            warningsData[guildId][target.id] += 1;
-            const currentWarnings = warningsData[guildId][target.id];
-            saveWarningsData(warningsData);
-
-            // Get safe username format (compatible with all Discord.js versions)
-            const targetTag = target.tag || `${target.username}#${target.discriminator || '0000'}`;
-
-            // Send confirmation embed for the warning
-            const embed = new EmbedBuilder()
-                .setColor('#FF0000')
-                .setTitle('⚠️ Member Warned')
-                .setDescription(`**${targetTag}** has been warned.\n\n👤 **User:** ${target}\n🔢 **Total Warnings:** ${currentWarnings} / 3\n📝 **Reason:** ${reason}`)
+            // Send a Direct Message (DM) to the member
+            const dmEmbed = new EmbedBuilder()
+                .setColor(0xFF0000)
+                .setTitle('⚠️ Anti-Spam / Flood Warning')
+                .setDescription(`You have been temporarily **timed out for 60 seconds** in **${message.guild.name}** for sending repetitive messages or flooding the chat.\n\n` +
+                    `*Please follow the server rules.*`)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed] });
+            await message.author.send({ embeds: [dmEmbed] }).catch(() => {});
 
-            // Check if the warning count has reached or exceeded 3
-            if (currentWarnings >= 3) {
-                const MODERATOR_ROLE_ID = '901459542976630865'; // Your updated Moderator Role ID
-
-                const alertEmbed = new EmbedBuilder()
-                    .setColor('#FFA500')
-                    .setTitle('🚨 Warning Limit Reached!')
-                    .setDescription(`⚠️ **${target}** (${targetTag}) has received **3 warnings**!\nPlease take necessary action (Kick/Ban/Mute).`)
-                    .setTimestamp();
-
-                await interaction.channel.send({
-                    content: `<@&${MODERATOR_ROLE_ID}>`, // Pings the moderator role using the provided ID
-                    embeds: [alertEmbed]
-                });
+            // Timeout the user for 60 seconds
+            if (message.member && message.member.moderatable) {
+                await message.member.timeout(60 * 1000, 'Automated Anti-Spam: Repetitive flood/spam').catch(() => {});
             }
+
+            // Reset user activity data to prevent infinite loops
+            userActivity.set(userId, { timestamps: [], lastContent: '', duplicateCount: 0 });
+
         } catch (error) {
-            console.error('[Warn Command Error]:', error);
-            if (!interaction.replied && !interaction.deferred) {
-                await interaction.reply({ content: '❌ An error occurred while executing this warning command.', ephemeral: true }).catch(() => {});
-            }
+            console.error('[Anti-Spam Error]:', error);
         }
-    },
-};
+    }
+});
+
+// Automatically reads the token from your panel environment variables
+client.login(process.env.DISCORD_TOKEN);
