@@ -67,14 +67,14 @@ module.exports = {
 
             if (!config[guildId]) {
                 config[guildId] = {
-                    notificationChannelId: '1535656663510417469', // Default channel ID you provided
+                    notificationChannelId: '1535656663510417469',
                     streamers: []
                 };
             }
 
             if (subcommand === 'set') {
                 const targetChannel = interaction.options.getChannel('channel');
-                if (targetChannel.type !== 0) { // 0 = GuildText
+                if (targetChannel.type !== 0) {
                     return interaction.reply({ content: '❌ Please select a valid Text Channel!', ephemeral: true });
                 }
 
@@ -95,7 +95,7 @@ module.exports = {
                 if (!config[guildId].streamers) config[guildId].streamers = [];
 
                 if (config[guildId].streamers.includes(username)) {
-                    return interaction.reply({ content: `❌ Streamer **${username}`} is already in the tracking list!`, ephemeral: true });
+                    return interaction.reply({ content: `❌ Streamer **${username}** is already in the tracking list!`, ephemeral: true });
                 }
 
                 config[guildId].streamers.push(username);
@@ -144,7 +144,7 @@ module.exports = {
                     .setDescription(`**${streamer}** has started streaming on Twitch!\n\n` +
                         `🎮 **Category:** Syndicate Gaming\n` +
                         `📢 **Title:** Ultimate Syndicate Live Stream | !socials !discord\n\n` +
-                        `*Click the button below to join the stream!*`)
+                        `*Click the link above to join the stream!*`)
                     .setImage(`https://static-cdn.jtvnw.net/previews-ttv/live_user_${streamer}-1920x1080.jpg`)
                     .setFooter({ text: 'Syndicate Twitch Alert System' })
                     .setTimestamp();
@@ -164,4 +164,4 @@ module.exports = {
             }
         }
     },
-};
+};                   
