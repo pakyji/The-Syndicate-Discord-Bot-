@@ -44,15 +44,15 @@ module.exports = {
                 .setFooter({ text: `Announcement by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
                 .setTimestamp();
 
-            let pingContent = '';
-            if (pingOption === '@everyone') pingContent = '@everyone';
-            if (pingOption === '@here') pingContent = '@here';
+            let contentToSend = undefined;
+            if (pingOption === '@everyone') contentToSend = '@everyone';
+            if (pingOption === '@here') contentToSend = '@here';
 
-            // Send message directly to the target channel
+            // Send message directly to the target channel with correct allowedMentions
             await targetChannel.send({
-                content: pingContent ? pingContent : undefined,
+                content: contentToSend,
                 embeds: [embed],
-                allowedMentions: { parse: ['everyone', 'here', 'roles'] }
+                allowedMentions: { parse: ['everyone', 'here'] }
             });
 
             return interaction.reply({
@@ -64,7 +64,12 @@ module.exports = {
             console.error('Error in announcement command:', error);
             if (!interaction.replied && !interaction.deferred) {
                 return interaction.reply({
-                    content: '❌ An error occurred while executing the announcement command. Make sure I have permission to send messages in that channel.',
+                    content: `❌ An error occurred while executing the announcement command: ${error.message}`,
+                    ephemeral: true
+                });
+            } else {
+                return interaction.followUp({
+                    content: `❌ An error occurred: ${error.message}`,
                     ephemeral: true
                 });
             }
