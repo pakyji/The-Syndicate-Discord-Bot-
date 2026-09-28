@@ -5,7 +5,7 @@ const TARGET_CHANNEL_ID = '1553912075494105139';
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('report')
-        .setDescription('Open an advanced report menu to report rule breakers safely.'),
+        .setDescription('Open the secure reporting center form.'),
 
     async execute(interaction) {
         const selectMenu = new StringSelectMenuBuilder()
@@ -51,10 +51,10 @@ module.exports = {
             .setFooter({ text: 'Powered by The Syndicate Security' })
             .setTimestamp();
 
-        await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+        // Se viene eseguito come comando, invia il pannello pubblico o effimero nel canale
+        await interaction.reply({ embeds: [embed], components: [row] });
     },
 
-    // This handles selections and modals directly when registered via standard bot command handlers
     async handleInteraction(interaction) {
         try {
             if (interaction.isStringSelectMenu() && interaction.customId === 'report_category_select') {
@@ -83,7 +83,7 @@ module.exports = {
                     .setStyle(TextInputStyle.Short)
                     .setRequired(true);
 
-                const descriptionInput = new ThumbnailBuilder ? null : new TextInputBuilder()
+                const descriptionInput = new TextInputBuilder()
                     .setCustomId('description_input')
                     .setLabel('Explain what happened')
                     .setPlaceholder('Provide a brief summary of the violation...')
@@ -98,14 +98,13 @@ module.exports = {
 
                 await interaction.showModal(modal);
             } 
-            
             else if (interaction.isModalSubmit() && interaction.customId.startsWith('report_modal_')) {
                 const suspect = interaction.fields.getTextInputValue('suspect_input');
                 const evidence = interaction.fields.getTextInputValue('evidence_input');
                 const details = interaction.fields.getTextInputValue('description_input');
                 const reportType = interaction.customId.replace('report_modal_', '');
 
-                let categoryName = 'General Report';
+            let categoryName = 'General Report';
                 if (reportType === 'report_scammer') categoryName = '🚨 Scammer Report';
                 if (reportType === 'report_rule') categoryName = '⚠️ Rule Violation';
                 if (reportType === 'report_dm') categoryName = '📢 DM Advertising';
@@ -130,8 +129,7 @@ module.exports = {
                 const userDmEmbed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('✅ Report Submitted Successfully')
-                    .setDescription(`Your report regarding **${suspect}** in **${interaction.guild.name}** has been securely submitted to our moderation team.\n\n` +
-                        `*Thank you for helping us keep the community safe.*`)
+                    .setDescription(`Your report regarding **${suspect}** in **${interaction.guild.name}** has been securely submitted to our moderation team.\n\n*Thank you for helping us keep the community safe.*`)
                     .setTimestamp();
 
                 await interaction.user.send({ embeds: [userDmEmbed] }).catch(() => {});
