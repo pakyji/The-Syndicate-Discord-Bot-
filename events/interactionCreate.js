@@ -6,9 +6,8 @@ const PS4_CHANNEL_ID = '901702088738865172';
 const PS5_CHANNEL_ID = '1550856575495839824';
 const PC_CHANNEL_ID = '1535658134230671370';
 const GIVEAWAY_CHANNEL_ID = '1546252181920022538';
-const REPORT_CHANNEL_ID = '1553912075494105139'; // Canale target per i report
 
-// Staff & Owner IDs for Direct DMs
+// Staff & Owner IDs for Direct DMs (Nessun canale pubblico utilizzato per i report)
 const STAFF_IDS = [
     '877175223504478218', // Owner
     '906193555498885120', // Admin
@@ -220,13 +219,7 @@ module.exports = {
                     )
                     .setTimestamp();
 
-                // 1. Send to Report Log Channel
-                const logChannel = interaction.guild.channels.cache.get(REPORT_CHANNEL_ID);
-                if (logChannel) {
-                    await logChannel.send({ embeds: [reportEmbed] }).catch(() => {});
-                }
-
-                // 2. Send DM directly to all specified Staff / Owner / Helper IDs
+                // Invia il report esclusivamente in DM a tutto lo staff configurato
                 for (const staffId of STAFF_IDS) {
                     try {
                         const staffUser = await client.users.fetch(staffId);
@@ -241,7 +234,7 @@ module.exports = {
                     }
                 }
 
-                // 3. Send Confirmation DM to Reporter
+                // Invia la conferma in DM all'utente che ha effettuato la segnalazione
                 const userDmEmbed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('✅ Report Submitted Successfully')
@@ -251,7 +244,7 @@ module.exports = {
                 await interaction.user.send({ embeds: [userDmEmbed] }).catch(() => {});
 
                 return await interaction.reply({
-                    content: '✅ **Your report has been successfully submitted to the moderation team, and a confirmation DM has been sent to you!**',
+                    content: '✅ **Your report has been successfully submitted to the moderation team via DM, and a confirmation message has been sent to you!**',
                     ephemeral: true
                 });
             }
