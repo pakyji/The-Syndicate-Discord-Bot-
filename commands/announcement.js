@@ -4,11 +4,6 @@ module.exports = {
     data: new SlashCommandBuilder()
         .setName('announcement')
         .setDescription('Send a custom announcement to any channel')
-        .addChannelOption(option =>
-            option.setName('channel')
-                .setDescription('The text channel where the announcement will be sent')
-                .addChannelTypes(ChannelType.GuildText)
-                .setRequired(true))
         .addStringOption(option =>
             option.setName('title')
                 .setDescription('The title of the announcement')
@@ -17,6 +12,11 @@ module.exports = {
             option.setName('message')
                 .setDescription('The main text/content of the announcement')
                 .setRequired(true))
+        .addChannelOption(option =>
+            option.setName('channel')
+                .setDescription('The text channel where the announcement will be sent (Optional)')
+                .addChannelTypes(ChannelType.GuildText)
+                .setRequired(false))
         .addStringOption(option =>
             option.setName('ping')
                 .setDescription('Choose a role ping option')
@@ -32,7 +32,7 @@ module.exports = {
 
     async execute(interaction) {
         try {
-            const targetChannel = interaction.options.getChannel('channel');
+            const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
             const title = interaction.options.getString('title');
             const message = interaction.options.getString('message');
             const pingOption = interaction.options.getString('ping') || 'none';
@@ -48,11 +48,10 @@ module.exports = {
             if (pingOption === '@everyone') contentToSend = '@everyone';
             if (pingOption === '@here') contentToSend = '@here';
 
-            // Send message directly to the target channel with correct allowedMentions
             await targetChannel.send({
                 content: contentToSend,
                 embeds: [embed],
-                allowedMentions: { parse: ['everyone', 'here'] }
+                allowedMentions: { parse: ['everyone'] }
             });
 
             return interaction.reply({
@@ -64,7 +63,7 @@ module.exports = {
             console.error('Error in announcement command:', error);
             if (!interaction.replied && !interaction.deferred) {
                 return interaction.reply({
-                    content: `❌ An error occurred while executing the announcement command: ${error.message}`,
+                    content: `❌ An error occurred: ${error.message}`,
                     ephemeral: true
                 });
             } else {
