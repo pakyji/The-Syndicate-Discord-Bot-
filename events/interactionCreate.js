@@ -8,6 +8,14 @@ const PC_CHANNEL_ID = '1535658134230671370';
 const GIVEAWAY_CHANNEL_ID = '1546252181920022538';
 const REPORT_CHANNEL_ID = '1553912075494105139'; // Canale target per i report
 
+// Staff & Owner IDs for Direct DMs
+const STAFF_IDS = [
+    '877175223504478218', // Owner
+    '906193555498885120', // Admin
+    '901459542976630865', // Moderator
+    '1553477223003201576'  // Helper
+];
+
 // GTA SOS Menu Constants & Memory Store
 const MAIN_LFG_CHANNEL_ID = '1535656533919014932';
 const ITALIAN_LFG_CHANNEL_ID = '1537221793922940928';
@@ -201,8 +209,6 @@ module.exports = {
                 if (reportType === 'report_rule') categoryName = '⚠️ Rule Violation';
                 if (reportType === 'report_dm') categoryName = '📢 DM Advertising';
 
-                const logChannel = interaction.guild.channels.cache.get(REPORT_CHANNEL_ID);
-                
                 const reportEmbed = new EmbedBuilder()
                     .setColor(0xFF0000)
                     .setTitle(`New Report: ${categoryName}`)
@@ -214,10 +220,28 @@ module.exports = {
                     )
                     .setTimestamp();
 
+                // 1. Send to Report Log Channel
+                const logChannel = interaction.guild.channels.cache.get(REPORT_CHANNEL_ID);
                 if (logChannel) {
                     await logChannel.send({ embeds: [reportEmbed] }).catch(() => {});
                 }
 
+                // 2. Send DM directly to all specified Staff / Owner / Helper IDs
+                for (const staffId of STAFF_IDS) {
+                    try {
+                        const staffUser = await client.users.fetch(staffId);
+                        if (staffUser) {
+                            await staffUser.send({
+                                content: `🚨 **New Report Alert in ${interaction.guild.name}:**`,
+                                embeds: [reportEmbed]
+                            });
+                        }
+                    } catch (err) {
+                        console.error(`Failed to send report DM to user ${staffId}:`, err);
+                    }
+                }
+
+                // 3. Send Confirmation DM to Reporter
                 const userDmEmbed = new EmbedBuilder()
                     .setColor(0x00FF00)
                     .setTitle('✅ Report Submitted Successfully')
