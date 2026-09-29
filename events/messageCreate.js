@@ -4,14 +4,6 @@ const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const TRANSLATION_CHANNEL_ID = '1538595475794563167';
 const ALERT_CHANNEL_ID = '902047746624749588';
 
-// Define the allowed channel IDs where images are permitted
-const ALLOWED_IMAGE_CHANNELS = [
-    '1536498743505846393',
-    '1536500109154451618',
-    '1535656663510417469',
-    '901702414896365628'
-];
-
 module.exports = {
     name: 'messageCreate',
     async execute(message, client) {
@@ -43,34 +35,7 @@ module.exports = {
             return;
         }
 
-        // Allow administrators or moderators to bypass anti-image restrictions
-        const isAdminOrMod = message.member.permissions.has(PermissionFlagsBits.Administrator);
-
-        // 2. Anti-Image Filter Feature
-        if (!isAdminOrMod) {
-            const hasAttachment = message.attachments.size > 0;
-            const hasEmbedImage = message.embeds.some(embed => embed.image || embed.thumbnail);
-
-            if (hasAttachment || hasEmbedImage) {
-                const isAllowedChannel = ALLOWED_IMAGE_CHANNELS.includes(message.channel.id);
-
-                if (!isAllowedChannel) {
-                    try {
-                        await message.delete();
-                        const allowedMentions = ALLOWED_IMAGE_CHANNELS.map(id => `<#${id}>`).join(', ');
-                        const warningMsg = await message.channel.send(
-                            `❌ ${message.author}, images are only allowed in ${allowedMentions}!`
-                        );
-                        setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
-                        return;
-                    } catch (error) {
-                        console.error('Anti-image error:', error);
-                    }
-                }
-            }
-        }
-
-        // 3. Translation Feature
+        // 2. Translation Feature
         if (message.channel.id === TRANSLATION_CHANNEL_ID) {
             try {
                 const encodedText = encodeURIComponent(message.content);
@@ -87,7 +52,7 @@ module.exports = {
             return;
         }
 
-        // 4. Automatic Moderation Filter (Bad words & Links)
+        // 3. Automatic Moderation Filter (Bad words & Links)
         const badWords = ['parolaccia1', 'parolaccia2'];
         const contentLower = message.content.toLowerCase();
         const hasBadWord = badWords.some(word => contentLower.includes(word));
@@ -105,7 +70,7 @@ module.exports = {
                 client.autoWarnings.set(userId, currentWarns);
 
                 const warningMsg = await message.channel.send(
-                    `⚠️ <@${userId}>, your message was deleted because it contained restricted content! (Auto-Warns: ${currentWarns}/3)`
+                    `⚠️ <@${userId}>, your message was deleted because it restricted content! (Auto-Warns: ${currentWarns}/3)`
                 );
                 
                 setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
