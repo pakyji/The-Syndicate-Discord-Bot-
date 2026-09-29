@@ -52,13 +52,17 @@ module.exports = {
             return;
         }
 
-        // 3. Automatic Moderation Filter (Bad words & Links)
+        // 3. Automatic Moderation Filter (Bad words & Links, allowing GIFs/Tenor/Giphy)
         const badWords = ['parolaccia1', 'parolaccia2'];
         const contentLower = message.content.toLowerCase();
         const hasBadWord = badWords.some(word => contentLower.includes(word));
         
         const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+|www\.[^\s]+)/i;
-        const hasLink = linkRegex.test(message.content);
+        
+        // Allow GIFs and media links (Tenor, Giphy, Discord attachments)
+        const isGifOrMedia = /(tenor\.com|giphy\.com|discordapp\.com|discord\.com\/attachments|\.(png|jpg|jpeg|gif|webp))\b/i.test(message.content);
+        
+        const hasLink = linkRegex.test(message.content) && !isGifOrMedia;
 
         if (hasBadWord || hasLink) {
             try {
@@ -70,7 +74,7 @@ module.exports = {
                 client.autoWarnings.set(userId, currentWarns);
 
                 const warningMsg = await message.channel.send(
-                    `⚠️ <@${userId}>, your message was deleted because it restricted content! (Auto-Warns: ${currentWarns}/3)`
+                    `⚠️ <@${userId}>, your message was deleted because it contained restricted content! (Auto-Warns: ${currentWarns}/3)`
                 );
                 
                 setTimeout(() => warningMsg.delete().catch(() => {}), 5000);
