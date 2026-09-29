@@ -31,6 +31,7 @@ client.on('messageCreate', async (message) => {
     const userId = message.author.id;
     const now = Date.now();
     const content = message.content.trim();
+    const hasAttachment = message.attachments.size > 0;
 
     if (!userActivity.has(userId)) {
         userActivity.set(userId, { timestamps: [], lastContent: '', duplicateCount: 0 });
@@ -42,17 +43,19 @@ client.on('messageCreate', async (message) => {
     userData.timestamps = userData.timestamps.filter(timestamp => now - timestamp < TIME_WINDOW);
     userData.timestamps.push(now);
 
-    // 2. Check for Duplicate Content Spam (Copy-paste spam like repeating the same text/mention)
-    if (content.length > 0 && userData.lastContent === content) {
-        userData.duplicateCount += 1;
-    } else {
-        userData.lastContent = content;
-        userData.duplicateCount = 1;
+    // 2. Check for Duplicate Content Spam (Skip if the message contains an image/attachment)
+    if (!hasAttachment) {
+        if (content.length > 0 && userData.lastContent === content) {
+            userData.duplicateCount += 1;
+        } else {
+            userData.lastContent = content;
+            userData.duplicateCount = 1;
+        }
     }
 
     // Determine if spam criteria is met (either too fast or repeating same text 3+ times)
     const isFastSpam = userData.timestamps.length > SPAM_LIMIT;
-    const isDuplicateSpam = userData.duplicateCount >= 3;
+    const isDuplicateSpam = !hasAttachment && userData.duplicateCount >= 3;
 
     if (isFastSpam || isDuplicateSpam) {
         try {
