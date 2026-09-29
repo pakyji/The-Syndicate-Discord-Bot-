@@ -15,13 +15,13 @@ module.exports = {
             const spotifyUrl = match[0];
 
             try {
-                // Optional: Delete the original text link to keep chat clean
-                // await message.delete().catch(() => {});
+                // Delete the original messy message to keep chat clean
+                await message.delete().catch(() => {});
 
-                // Create a professional Spotify embed card
+                // Create a professional Spotify embed card with the author's name
                 const spotifyEmbed = new EmbedBuilder()
                     .setColor(0x1DB954) // Official Spotify Green color
-                    .setTitle('🎵 Spotify Link Detected')
+                    .setTitle('🎵 Spotify Link')
                     .setDescription(`**Shared by:** <@${message.author.id}>\n\n🔗 [Click here to listen on Spotify](${spotifyUrl})`)
                     .setFooter({ 
                         text: 'Spotify Media Share', 
