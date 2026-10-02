@@ -1,12 +1,24 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
-let antiLinkStatus = true;
-const customBlockedLinks = new Set();
+const storagePath = path.join(__dirname, 'securityStorage.json');
+
+function loadData() {
+    if (!fs.existsSync(storagePath)) {
+        fs.writeFileSync(storagePath, JSON.stringify({ antiLinkStatus: true, antiBadWordsStatus: true, customBlockedLinks: [], customBadWords: [] }, null, 4));
+    }
+    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+}
+
+function saveData(data) {
+    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
+}
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('antilink')
-        .setDescription('Manage the anti-link security settings.')
+        .setDescription('Manage anti-link protection and custom blocked links.')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand(subcommand =>
             subcommand
@@ -23,21 +35,23 @@ module.exports = {
         .addSubcommand(subcommand =>
             subcommand
                 .setName('add')
-                .setDescription('Add a custom link or domain to block.')
+                .setDescription('Add a custom domain or link to the blocklist.')
                 .addStringOption(option =>
                     option.setName('domain')
                         .setDescription('The domain or link to block (e.g., scamlink.com)')
                         .setRequired(true))),
 
     async execute(interaction) {
+        const data = loadData();
         const subcommand = interaction.options.getSubcommand();
 
         if (subcommand === 'toggle') {
             const status = interaction.options.getString('status');
-            antiLinkStatus = (status === 'on');
+            data.antiLinkStatus = (status === 'on');
+            saveData(data);
 
             const embed = new EmbedBuilder()
-                .setColor(antiLinkStatus ? 0x00FF00 : 0xFF0000)
+                .setColor(data.antiLinkStatus ? 0x00FF00 : 0xFF0000)
                 .setTitle('🛡️ Anti-Link Status Updated')
                 .setDescription(`Anti-link protection has been turned **${status.toUpperCase()}**.`)
                 .setTimestamp();
@@ -45,13 +59,19 @@ module.exports = {
             await interaction.reply({ embeds: [embed], ephemeral: true });
 
         } else if (subcommand === 'add') {
-            const domain = interaction.options.getString('domain').toLowerCase();
-            customBlockedLinks.add(domain);
+            const domain = interaction.options.getString('domain').toLowerCase().trim();
+            
+            if (data.customBlockedLinks.includes(domain)) {
+                return await interaction.reply({ content: `⚠️ \`${domain}\` is already in the blocked list.`, ephemeral: true });
+            }
+
+            data.customBlockedLinks.push(domain);
+            saveData(data);
 
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
                 .setTitle('🛡️ Custom Link Blocked')
-                .setDescription(`Successfully added \`${domain}\` to the custom anti-link blocklist.`)
+                .setDescription(`Successfully added \`${domain}\` to your custom anti-link blocklist.`)
                 .setTimestamp();
 
             await interaction.reply({ embeds: [embed], ephemeral: true });
