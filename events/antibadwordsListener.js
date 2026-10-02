@@ -2,7 +2,8 @@ const { Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-const storagePath = path.join(__dirname, '../Commands/moderation/securityStorage.json');
+// Updated path matching your exact lowercase 'commands' folder structure on GitHub
+const storagePath = path.join(__dirname, '../commands/moderation/securityStorage.json');
 
 function loadData() {
     if (!fs.existsSync(storagePath)) return { antiBadWordsStatus: true, customBadWords: [] };
@@ -19,9 +20,9 @@ module.exports = {
 
         const content = message.content.toLowerCase();
 
-        if (data.customBadWords) {
+        if (data.customBadWords && Array.isArray(data.customBadWords)) {
             for (const word of data.customBadWords) {
-                if (content.includes(word)) {
+                if (content.includes(word.toLowerCase())) {
                     try {
                         await message.delete();
                         const warning = await message.channel.send(`⚠️ ${message.author}, that word is prohibited.`);
