@@ -42,6 +42,9 @@ module.exports = {
                         .setRequired(true))),
 
     async execute(interaction) {
+        // Prevent "The application did not respond" timeout error
+        await interaction.deferReply({ ephemeral: true });
+
         const data = loadData();
         const subcommand = interaction.options.getSubcommand();
 
@@ -56,13 +59,13 @@ module.exports = {
                 .setDescription(`Bad words filter has been turned **${status.toUpperCase()}**.`)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
 
         } else if (subcommand === 'add') {
             const word = interaction.options.getString('word').toLowerCase().trim();
 
             if (data.customBadWords.includes(word)) {
-                return await interaction.reply({ content: `⚠️ The word \`${word}\` is already in the filter list.`, ephemeral: true });
+                return await interaction.editReply({ content: `⚠️ The word \`${word}\` is already in the filter list.` });
             }
 
             data.customBadWords.push(word);
@@ -70,11 +73,11 @@ module.exports = {
 
             const embed = new EmbedBuilder()
                 .setColor(0x00FF00)
-                .setTitle('🛡️️ Custom Bad Word Added')
+                .setTitle('🛡 Custom Bad Word Added')
                 .setDescription(`Successfully added \`${word}\` to your prohibited words list.`)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
         }
     },
 };
