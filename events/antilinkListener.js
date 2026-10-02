@@ -2,7 +2,8 @@ const { Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-const storagePath = path.join(__dirname, '../Commands/moderation/securityStorage.json');
+// Updated path matching your exact lowercase 'commands' folder structure on GitHub
+const storagePath = path.join(__dirname, '../commands/moderation/securityStorage.json');
 
 function loadData() {
     if (!fs.existsSync(storagePath)) return { antiLinkStatus: true, customBlockedLinks: [] };
@@ -22,9 +23,9 @@ module.exports = {
         let isBlocked = urlPattern.test(content);
 
         // Check custom added links/domains
-        if (data.customBlockedLinks) {
+        if (data.customBlockedLinks && Array.isArray(data.customBlockedLinks)) {
             for (const domain of data.customBlockedLinks) {
-                if (content.includes(domain)) {
+                if (content.includes(domain.toLowerCase())) {
                     isBlocked = true;
                     break;
                 }
