@@ -19,10 +19,14 @@ module.exports = {
 
         const content = message.content.toLowerCase();
 
-        // Check if the link is a GIF (Tenor, Giphy, or ends with .gif)
-        const isGif = content.includes('tenor.com') || content.includes('giphy.com') || content.endsWith('.gif');
+        // Check if the link is a GIF platform (Tenor, Giphy, Klipy) or a direct .gif link
+        const isGif = content.includes('tenor.com') || 
+                      content.includes('giphy.com') || 
+                      content.includes('klipy.co') || 
+                      content.includes('klipy') || 
+                      content.endsWith('.gif');
 
-        // If it's a GIF, we skip blocking it entirely
+        // If it's a GIF link, allow it and skip blocking
         if (isGif) return;
 
         const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
