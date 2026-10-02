@@ -42,6 +42,9 @@ module.exports = {
                         .setRequired(true))),
 
     async execute(interaction) {
+        // Prevent "The application did not respond" timeout error
+        await interaction.deferReply({ ephemeral: true });
+
         const data = loadData();
         const subcommand = interaction.options.getSubcommand();
 
@@ -56,13 +59,13 @@ module.exports = {
                 .setDescription(`Anti-link protection has been turned **${status.toUpperCase()}**.`)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
 
         } else if (subcommand === 'add') {
             const domain = interaction.options.getString('domain').toLowerCase().trim();
             
             if (data.customBlockedLinks.includes(domain)) {
-                return await interaction.reply({ content: `⚠️ \`${domain}\` is already in the blocked list.`, ephemeral: true });
+                return await interaction.editReply({ content: `⚠️️ \`${domain}\` is already in the blocked list.` });
             }
 
             data.customBlockedLinks.push(domain);
@@ -74,7 +77,7 @@ module.exports = {
                 .setDescription(`Successfully added \`${domain}\` to your custom anti-link blocklist.`)
                 .setTimestamp();
 
-            await interaction.reply({ embeds: [embed], ephemeral: true });
+            await interaction.editReply({ embeds: [embed] });
         }
     },
 };
