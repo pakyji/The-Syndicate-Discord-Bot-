@@ -2,7 +2,6 @@ const { Events } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
-// Updated path matching your exact lowercase 'commands' folder structure on GitHub
 const storagePath = path.join(__dirname, '../commands/moderation/securityStorage.json');
 
 function loadData() {
@@ -19,6 +18,13 @@ module.exports = {
         if (!data.antiLinkStatus) return;
 
         const content = message.content.toLowerCase();
+
+        // Check if the link is a GIF (Tenor, Giphy, or ends with .gif)
+        const isGif = content.includes('tenor.com') || content.includes('giphy.com') || content.endsWith('.gif');
+
+        // If it's a GIF, we skip blocking it entirely
+        if (isGif) return;
+
         const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
         let isBlocked = urlPattern.test(content);
 
