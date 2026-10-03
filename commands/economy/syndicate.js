@@ -31,7 +31,10 @@ module.exports = {
 
         const data = loadSyndicateData();
         if (!data[userId]) {
-            data[userId] = { chats: {} };
+            data[userId] = { chats: {}, currentPage: 0 };
+            saveSyndicateData(data);
+        } else {
+            data[userId].currentPage = 0;
             saveSyndicateData(data);
         }
 
@@ -70,7 +73,9 @@ module.exports = {
             }
 
             const currentData = loadSyndicateData();
+            if (!currentData[userId]) currentData[userId] = { chats: {}, currentPage: 0 };
 
+            // Handle Modal Opening via Button
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -91,6 +96,7 @@ module.exports = {
                 return await i.showModal(modal);
             }
 
+            // Handle Chats Tab
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -118,11 +124,20 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [chatNavRow, getNavBar()] });
             }
 
-            if (i.customId === 'nav_contacts' || (i.customId && i.customId.startsWith('contacts_page_'))) {
-                let page = 0;
-                if (i.customId && i.customId.startsWith('contacts_page_')) {
-                    page = parseInt(i.customId.replace('contacts_page_', '')) || 0;
+            // Handle Contacts Tab & Pagination (Using Safe Fixed Custom IDs)
+            if (i.customId === 'nav_contacts' || i.customId === 'page_prev' || i.customId === 'page_next') {
+                let page = currentData[userId].currentPage || 0;
+                
+                if (i.customId === 'page_prev') {
+                    page = Math.max(0, page - 1);
+                } else if (i.customId === 'page_next') {
+                    page += 1;
+                } else if (i.customId === 'nav_contacts') {
+                    page = 0;
                 }
+
+                currentData[userId].currentPage = page;
+                saveSyndicateData(currentData);
 
                 const start = page * 25;
                 const end = start + 25;
@@ -150,19 +165,20 @@ module.exports = {
                         .addOptions(options.length > 0 ? options : [{ label: 'No members available', value: 'none' }])
                 );
 
+                const components = [selectRow];
+
                 const paginationRow = new ActionRowBuilder();
                 if (page > 0) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId(`contacts_page_${page - 1}`).setLabel('Previous').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
+                        new ButtonBuilder().setCustomId('page_prev').setLabel('Previous').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
                     );
                 }
                 if (end < membersList.length) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId(`contacts_page_${page + 1}`).setLabel('Next').setStyle(ButtonStyle.Primary).setEmoji('➡️')
+                        new ButtonBuilder().setCustomId('page_next').setLabel('Next').setStyle(ButtonStyle.Primary).setEmoji('➡️')
                     );
                 }
 
-                const components = [selectRow];
                 if (paginationRow.components.length > 0) {
                     components.push(paginationRow);
                 }
@@ -171,6 +187,7 @@ module.exports = {
                 return await i.update({ embeds: [contactEmbed], components: components });
             }
 
+            // Handle Network Tab
             if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -185,6 +202,7 @@ module.exports = {
                 return await i.update({ embeds: [netEmbed], components: [getNavBar()] });
             }
 
+            // Handle Profile Tab
             if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -194,6 +212,7 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
+            // Handle Contact Selection from Dropdown
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 if (targetId === 'none') return;
@@ -215,7 +234,7 @@ module.exports = {
                     .setFooter({ text: 'online • encrypted link' });
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
@@ -223,70 +242,71 @@ module.exports = {
             }
         });
 
-        interaction.client.on('interactionCreate', async (modalInt) => {
-            if (!modalInt.isModalSubmit()) return;
-            if (!modalInt.customId.startsWith('synd_msg_modal_')) return;
-            if (modalInt.user.id !== userId) return;
-
-            try {
-                const targetId = modalInt.customId.replace('synd_msg_modal_', '');
-                const messageText = modalInt.fields.getTextInputValue('synd_message_body');
-                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                const currentData = loadSyndicateData();
-                if (!currentData[userId]) currentData[userId] = { chats: {} };
-                if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
-
-                currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
-
-                if (!currentData[targetId]) currentData[targetId] = { chats: {} };
-                if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-                currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
-
-                saveSyndicateData(currentData);
-
-                await modalInt.deferUpdate();
-
+        // Modal Submit Event Listener via awaitModalSubmit
+        const filter = (modalInt) => modalInt.customId.startsWith('synd_msg_modal_') && modalInt.user.id === userId;
+        
+        message.awaitModalSubmit({ filter, time: 900_000 })
+            .then(async (modalInt) => {
                 try {
-                    const targetUser = await interaction.client.users.fetch(targetId);
-                    if (targetUser) {
-                        const notifEmbed = new EmbedBuilder()
-                            .setColor(0x00FF66)
-                            .setTitle('📱 NEW SYNDICATE TRANSMISSION')
-                            .setDescription(`You received a new message from **${interaction.user.username}**!\n\n> "${messageText}"`)
-                            .setFooter({ text: 'Run /syndicate in the server to reply.' })
-                            .setTimestamp();
+                    const targetId = modalInt.customId.replace('synd_msg_modal_', '');
+                    const messageText = modalInt.fields.getTextInputValue('synd_message_body');
+                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-                        await targetUser.send({ embeds: [notifEmbed] });
+                    const currentData = loadSyndicateData();
+                    if (!currentData[userId]) currentData[userId] = { chats: {} };
+                    if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
+
+                    currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    if (!currentData[targetId]) currentData[targetId] = { chats: {} };
+                    if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
+                    currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    saveSyndicateData(currentData);
+
+                    await modalInt.deferUpdate();
+
+                    try {
+                        const targetUser = await interaction.client.users.fetch(targetId);
+                        if (targetUser) {
+                            const notifEmbed = new EmbedBuilder()
+                                .setColor(0x00FF66)
+                                .setTitle('📱 NEW SYNDICATE TRANSMISSION')
+                                .setDescription(`You received a new message from **${interaction.user.username}**!\n\n> "${messageText}"`)
+                                .setFooter({ text: 'Run /syndicate in the server to reply.' })
+                                .setTimestamp();
+
+                            await targetUser.send({ embeds: [notifEmbed] });
+                        }
+                    } catch (dmErr) {
+                        console.log('Could not send DM notification:', dmErr);
                     }
-                } catch (dmErr) {
-                    console.log('Could not send DM notification:', dmErr);
+
+                    const targetMember = guild.members.cache.get(targetId);
+                    const targetName = targetMember ? targetMember.user.username : 'User';
+                    const conversation = currentData[userId].chats[targetId] || [];
+
+                    let chatHistory = conversation.map(m => {
+                        const isMe = m.sender === userId;
+                        return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**: ${m.text}`;
+                    }).join('\n\n');
+
+                    const activeChatEmbed = new EmbedBuilder()
+                        .setColor(0x00FF66)
+                        .setTitle(`💬 Chat // ${targetName}`)
+                        .setDescription(chatHistory)
+                        .setFooter({ text: 'online • encrypted link' });
+
+                    const chatActionRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                        new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    );
+
+                    await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
+                } catch (err) {
+                    console.error('Modal submission processing error:', err);
                 }
-
-                const targetMember = guild.members.cache.get(targetId);
-                const targetName = targetMember ? targetMember.user.username : 'User';
-                const conversation = currentData[userId].chats[targetId] || [];
-
-                let chatHistory = conversation.map(m => {
-                    const isMe = m.sender === userId;
-                    return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**: ${m.text}`;
-                }).join('\n\n');
-
-                const activeChatEmbed = new EmbedBuilder()
-                    .setColor(0x00FF66)
-                    .setTitle(`💬 Chat // ${targetName}`)
-                    .setDescription(chatHistory)
-                    .setFooter({ text: 'online • encrypted link' });
-
-                const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-                );
-
-                await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
-            } catch (err) {
-                console.error('Modal notification error:', err);
-            }
-        });
+            })
+            .catch(() => {});
     },
-};                             
+};
