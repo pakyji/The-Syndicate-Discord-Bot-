@@ -188,12 +188,12 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [chatNavRow, getNavBar()] });
             }
 
-            if (i.customId === 'nav_contacts' || i.customId === 'page_prev' || i.customId === 'page_next') {
+            if (i.customId === 'nav_contacts' || i.customId === 'syn_page_prev' || i.customId === 'syn_page_next') {
                 let page = currentData[userId].currentPage || 0;
                 
-                if (i.customId === 'page_prev') {
+                if (i.customId === 'syn_page_prev') {
                     page = Math.max(0, page - 1);
-                } else if (i.customId === 'page_next') {
+                } else if (i.customId === 'syn_page_next') {
                     page += 1;
                 } else if (i.customId === 'nav_contacts') {
                     page = 0;
@@ -233,12 +233,12 @@ module.exports = {
                 const paginationRow = new ActionRowBuilder();
                 if (page > 0) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId('page_prev').setLabel('Previous').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
+                        new ButtonBuilder().setCustomId('syn_page_prev').setLabel('Previous').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
                     );
                 }
                 if (end < membersList.length) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId('page_next').setLabel('Next').setStyle(ButtonStyle.Primary).setEmoji('➡️')
+                        new ButtonBuilder().setCustomId('syn_page_next').setLabel('Next').setStyle(ButtonStyle.Primary).setEmoji('➡️')
                     );
                 }
 
