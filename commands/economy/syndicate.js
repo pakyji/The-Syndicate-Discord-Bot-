@@ -35,17 +35,16 @@ module.exports = {
             saveSyndicateData(data);
         }
 
-        // Helper function to build the bottom navigation bar matching your design layout
+        // Unique navigation bar IDs to prevent duplication conflicts
         function getNavBar() {
             return new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('syn_tab_chats').setLabel('Chats').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
-                new ButtonBuilder().setCustomId('syn_tab_contacts').setLabel('Contacts').setStyle(ButtonStyle.Secondary).setEmoji('👥'),
-                new ButtonBuilder().setCustomId('syn_tab_network').setLabel('Network').setStyle(ButtonStyle.Secondary).setEmoji('📡'),
-                new ButtonBuilder().setCustomId('syn_tab_profile').setLabel('Profile').setStyle(ButtonStyle.Secondary).setEmoji('👤')
+                new ButtonBuilder().setCustomId('nav_chats').setLabel('Chats').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
+                new ButtonBuilder().setCustomId('nav_contacts').setLabel('Contacts').setStyle(ButtonStyle.Secondary).setEmoji('👥'),
+                new ButtonBuilder().setCustomId('nav_network').setLabel('Network').setStyle(ButtonStyle.Secondary).setEmoji('📡'),
+                new ButtonBuilder().setCustomId('nav_profile').setLabel('Profile').setStyle(ButtonStyle.Secondary).setEmoji('👤')
             );
         }
 
-        // 1. Home Dashboard View
         const homeEmbed = new EmbedBuilder()
             .setColor(0x00FF66)
             .setTitle('🟢 SYND // PRIVATE ROLEPLAY NETWORK')
@@ -64,7 +63,7 @@ module.exports = {
 
         const message = await interaction.editReply({ embeds: [homeEmbed], components: [homeRow] });
 
-        const collector = message.createMessageComponentCollector({ time: 900_000 }); // 15 minutes
+        const collector = message.createMessageComponentCollector({ time: 900_000 });
 
         collector.on('collect', async (i) => {
             if (i.user.id !== userId) {
@@ -73,7 +72,7 @@ module.exports = {
 
             const currentData = loadSyndicateData();
 
-            // Handle Modal Submissions First
+            // Handle Modal Submissions
             if (i.isModalSubmit() && i.customId.startsWith('synd_msg_modal_')) {
                 const targetId = i.customId.replace('synd_msg_modal_', '');
                 const messageText = i.fields.getTextInputValue('synd_message_body');
@@ -82,25 +81,16 @@ module.exports = {
                 if (!currentData[userId]) currentData[userId] = { chats: {} };
                 if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
 
-                currentData[userId].chats[targetId].push({
-                    sender: userId,
-                    text: messageText,
-                    time: timestamp
-                });
+                currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
 
                 if (!currentData[targetId]) currentData[targetId] = { chats: {} };
                 if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-                currentData[targetId].chats[userId].push({
-                    sender: userId,
-                    text: messageText,
-                    time: timestamp
-                });
+                currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
 
                 saveSyndicateData(currentData);
 
                 await i.reply({ content: `✅ Encrypted message transmitted successfully.`, ephemeral: true });
 
-                // Refresh the active chat view
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
                 const conversation = currentData[userId].chats[targetId] || [];
@@ -120,14 +110,14 @@ module.exports = {
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('syn_tab_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow, getNavBar()] });
             }
 
-            // Open App Main Dashboard
-            if (i.customId === 'syn_open_app' || i.customId === 'syn_tab_chats') {
+            // Open App Main Dashboard & Chats Tab
+            if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
 
@@ -164,7 +154,7 @@ module.exports = {
             }
 
             // Contacts Tab
-            if (i.customId === 'syn_tab_contacts') {
+            if (i.customId === 'nav_contacts') {
                 const contactsDesc = membersList.map(m => `🟢 **${m.user.username}**\n└ \`online now • verified node\``).join('\n\n');
 
                 const contactEmbed = new EmbedBuilder()
@@ -177,7 +167,7 @@ module.exports = {
             }
 
             // Network Tab
-            if (i.customId === 'syn_tab_network') {
+            if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
                     .setTitle('📡 SYNDICATE // NETWORK NODES')
@@ -192,7 +182,7 @@ module.exports = {
             }
 
             // Profile Tab
-            if (i.customId === 'syn_tab_profile') {
+            if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
                     .setTitle('👤 SYNDICATE // PROFILE')
@@ -201,7 +191,7 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
-            // Select Menu Interaction -> Open Specific Chat View
+            // Select Menu -> Open Specific Chat View
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -223,13 +213,13 @@ module.exports = {
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('syn_tab_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow, getNavBar()] });
             }
 
-            // Trigger Modal from Active Chat View
+            // Trigger Modal from Chat View
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
