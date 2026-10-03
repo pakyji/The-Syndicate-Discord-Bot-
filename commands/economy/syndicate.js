@@ -62,61 +62,44 @@ module.exports = {
 
         const message = await interaction.editReply({ embeds: [homeEmbed], components: [homeRow] });
 
+        // Create a collector that listens to BOTH components and modals if possible, 
+        // or we handle modal submissions by listening to client/global collector events.
         const collector = message.createMessageComponentCollector({ time: 900_000 });
 
+        // Since a message component collector doesn't catch modals, we listen to client-level modal submissions 
+        // filtered for this specific user and modal prefix during the active session.
+        const filter = (modalInt) => modalInt.customId.startsWith('synd_msg_modal_') && modalInt.user.id === userId;
+        const modalCollector = interaction.channel.createMessageComponentCollector ? null : null; // alternative approach below
+
         collector.on('collect', async (i) => {
-            // Handle Modal Submissions Separately
-            if (i.isModalSubmit()) {
-                if (i.customId.startsWith('synd_msg_modal_')) {
-                    const targetId = i.customId.replace('synd_msg_modal_', '');
-                    const messageText = i.fields.getTextInputValue('synd_message_body');
-                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                    const currentData = loadSyndicateData();
-                    if (!currentData[userId]) currentData[userId] = { chats: {} };
-                    if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
-
-                    currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
-
-                    if (!currentData[targetId]) currentData[targetId] = { chats: {} };
-                    if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-                    currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
-
-                    saveSyndicateData(currentData);
-
-                    await i.reply({ content: '✅ Message sent successfully!', ephemeral: true });
-
-                    const targetMember = guild.members.cache.get(targetId);
-                    const targetName = targetMember ? targetMember.user.username : 'User';
-                    const conversation = currentData[userId].chats[targetId] || [];
-
-                    let chatHistory = conversation.map(m => {
-                        const isMe = m.sender === userId;
-                        return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**:${m.text}`;
-                    }).join('\n\n');
-
-                    const activeChatEmbed = new EmbedBuilder()
-                        .setColor(0x00FF66)
-                        .setTitle(`💬 Chat // ${targetName}`)
-                        .setDescription(chatHistory)
-                        .setFooter({ text: 'online • encrypted link' });
-
-                    const chatActionRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                        new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-                    );
-
-                    return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
-                }
-                return;
-            }
-
             if (i.user.id !== userId) {
                 return await i.reply({ content: '❌ This device is locked. It is not your terminal.', ephemeral: true });
             }
 
             const currentData = loadSyndicateData();
 
+            // 1. Open Modal Trigger
+            if (i.customId && i.customId.startsWith('syn_send_')) {
+                const targetId = i.customId.replace('syn_send_', '');
+                const targetMember = guild.members.cache.get(targetId);
+                const targetName = targetMember ? targetMember.user.username : 'User';
+
+                const modal = new ModalBuilder()
+                    .setCustomId(`synd_msg_modal_${targetId}`)
+                    .setTitle(`Chat with ${targetName}`);
+
+                const msgInput = new TextInputBuilder()
+                    .setCustomId('synd_message_body')
+                    .setLabel('Type your message:')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Type your encrypted message here...')
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
+                return await i.showModal(modal);
+            }
+
+            // 2. Navigation & App Menus
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -214,26 +197,61 @@ module.exports = {
 
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
+        });
 
-            if (i.customId && i.customId.startsWith('syn_send_')) {
-                const targetId = i.customId.replace('syn_send_', '');
+        // Separate global client collector listener for the modal submission to prevent any "Something went wrong" crashes
+        const clientModalCollector = interaction.client.on('interactionCreate', async (modalInt) => {
+            if (!modalInt.isModalSubmit()) return;
+            if (!modalInt.customId.startsWith('synd_msg_modal_')) return;
+            if (modalInt.user.id !== userId) return;
+
+            try {
+                const targetId = modalInt.customId.replace('synd_msg_modal_', '');
+                const messageText = modalInt.fields.getTextInputValue('synd_message_body');
+                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                const currentData = loadSyndicateData();
+                if (!currentData[userId]) currentData[userId] = { chats: {} };
+                if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
+
+                currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
+
+                if (!currentData[targetId]) currentData[targetId] = { chats: {} };
+                if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
+                currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
+
+                saveSyndicateData(currentData);
+
+                await modalInt.deferUpdate();
+
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
+                const conversation = currentData[userId].chats[targetId] || [];
 
-                const modal = new ModalBuilder()
-                    .setCustomId(`synd_msg_modal_${targetId}`)
-                    .setTitle(`Chat with ${targetName}`);
+                let chatHistory = conversation.map(m => {
+                    const isMe = m.sender === userId;
+                    return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**: ${m.text}`;
+                }).join('\n\n');
 
-                const msgInput = new TextInputBuilder()
-                    .setCustomId('synd_message_body')
-                    .setLabel('Type your message:')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setPlaceholder('Type your encrypted message here...')
-                    .setRequired(true);
+                const activeChatEmbed = new EmbedBuilder()
+                    .setColor(0x00FF66)
+                    .setTitle(`💬 Chat // ${targetName}`)
+                    .setDescription(chatHistory)
+                    .setFooter({ text: 'online • encrypted link' });
 
-                modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
-                return await i.showModal(modal);
+                const chatActionRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                );
+
+                await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
+            } catch (err) {
+                console.error('Modal error:', err);
             }
+        });
+
+        collector.on('end', () => {
+            // Cleanup listener if needed or let it timeout naturally
         });
     },
 };
