@@ -27,7 +27,7 @@ module.exports = {
         const guild = interaction.guild;
 
         await guild.members.fetch();
-        const membersList = guild.members.cache.filter(m => !m.user.bot);
+        const membersList = Array.from(guild.members.cache.filter(m => !m.user.bot).values());
 
         const data = loadSyndicateData();
         if (!data[userId]) {
@@ -51,7 +51,7 @@ module.exports = {
             .addFields(
                 { name: '🟢 Status', value: '`ONLINE`', inline: true },
                 { name: '🔒 Link', value: '`ENCRYPTED`', inline: true },
-                { name: '👥 Members', value: `\`${membersList.size} Linked\``, inline: true }
+                { name: '👥 Members', value: `\`${membersList.length} Linked\``, inline: true }
             )
             .setFooter({ text: 'Syndicate Mobile OS' })
             .setTimestamp();
@@ -91,65 +91,57 @@ module.exports = {
                 return await i.showModal(modal);
             }
 
-            if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
-                const userChats = currentData[userId]?.chats || {};
-                const chatKeys = Object.keys(userChats);
-
-                let chatsListDesc = 'No active chat nodes found. Open Contacts to start a secure link.';
-                if (chatKeys.length > 0) {
-                    chatsListDesc = chatKeys.map(targetId => {
-                        const targetUser = guild.members.cache.get(targetId)?.user;
-                        const username = targetUser ? targetUser.username : 'Unknown Node';
-                        const lastMsg = userChats[targetId].slice(-1)[0];
-                        return `💬 **${username}**\n└ *${lastMsg ? lastMsg.text : 'No history'}* — \`online\``;
-                    }).join('\n\n');
+            if (i.customId === 'syn_open_app' || i.customId === 'nav_chats' || (i.customId && i.customId.startsWith('contacts_page_'))) {
+                let page = 0;
+                if (i.customId && i.customId.startsWith('contacts_page_')) {
+                    page = parseInt(i.customId.replace('contacts_page_', '')) || 0;
                 }
 
-                const appEmbed = new EmbedBuilder()
-                    .setColor(0x00FF66)
-                    .setTitle('📱 SYNDICATE // CHATS')
-                    .setDescription(chatsListDesc)
-                    .setFooter({ text: 'Select a member below to open direct encrypted line' });
+                const start = page * 25;
+                const end = start + 25;
+                const paginatedMembers = membersList.slice(start, end);
+                const maxPages = Math.ceil(membersList.length / 25);
 
-                const options = membersList.map(m => ({
-                    label: m.user.username.substring(0, 25),
-                    value: `chat_${m.id}`,
-                    description: 'Open secure chat feed'
-                })).slice(0, 25);
-
-                const selectRow = new ActionRowBuilder().addComponents(
-                    new StringSelectMenuBuilder()
-                        .setCustomId('select_chat_target')
-                        .setPlaceholder('Select a chat to open...')
-                        .addOptions(options.length > 0 ? options : [{ label: 'No members available', value: 'none' }])
-                );
-
-                return await i.update({ embeds: [appEmbed], components: [selectRow, getNavBar()] });
-            }
-
-            if (i.customId === 'nav_contacts') {
-                const contactsDesc = membersList.map(m => `🟢 **${m.user.username}** — \`online\``).join('\n\n');
+                const contactsDesc = paginatedMembers.map(m => `🟢 **${m.user.username}** — \`online\``).join('\n\n');
 
                 const contactEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
-                    .setTitle(`👥 SYNDICATE // CONTACTS (${membersList.size})`)
+                    .setTitle(`👥 SYNDICATE // CONTACTS (Page ${page + 1}/${maxPages})`)
                     .setDescription(contactsDesc.substring(0, 4000) || 'No verified members.')
-                    .setFooter({ text: 'Select a contact from the menu below to message them.' });
+                    .setFooter({ text: 'Select a contact from the menu below or change pages.' });
 
-                const options = membersList.map(m => ({
+                const options = paginatedMembers.map(m => ({
                     label: m.user.username.substring(0, 25),
                     value: `chat_${m.id}`,
                     description: 'Start secure chat'
-                })).slice(0, 25);
+                }));
 
                 const selectRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('select_chat_target')
-                        .setPlaceholder('Select a contact to message...')
+                        .setPlaceholder(`Select a contact (Page ${page + 1}/${maxPages})...`)
                         .addOptions(options.length > 0 ? options : [{ label: 'No members available', value: 'none' }])
                 );
 
-                return await i.update({ embeds: [contactEmbed], components: [selectRow, getNavBar()] });
+                const paginationRow = new ActionRowBuilder();
+                if (page > 0) {
+                    paginationRow.addComponents(
+                        new ButtonBuilder().setCustomId(`contacts_page_${page - 1}`).setLabel('Previous Page').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
+                    );
+                }
+                if (end < membersList.length) {
+                    paginationRow.addComponents(
+                        new ButtonBuilder().setCustomId(`contacts_page_${page + 1}`).setLabel('Next Page').setStyle(ButtonStyle.Primary).setEmoji('➡️')
+                    );
+                }
+
+                const components = [selectRow];
+                if (paginationRow.components.length > 0) {
+                    components.push(paginationRow);
+                }
+                components.push(getNavBar());
+
+                return await i.update({ embeds: [contactEmbed], components: components });
             }
 
             if (i.customId === 'nav_network') {
@@ -157,7 +149,7 @@ module.exports = {
                     .setColor(0x00FF66)
                     .setTitle('📡 SYNDICATE // NETWORK NODES')
                     .addFields(
-                        { name: 'Live Nodes', value: `\`${membersList.size} Active\``, inline: true },
+                        { name: 'Live Nodes', value: `\`${membersList.length} Active\``, inline: true },
                         { name: 'Network', value: '`STABLE`', inline: true },
                         { name: 'Sync Layer', value: '`ACTIVE`', inline: true }
                     )
@@ -197,7 +189,7 @@ module.exports = {
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
@@ -261,7 +253,7 @@ module.exports = {
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
