@@ -77,7 +77,6 @@ module.exports = {
             const currentData = loadSyndicateData();
             if (!currentData[userId]) currentData[userId] = { chats: {}, currentPage: 0 };
 
-            // Handle Modal Opening via Button
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -162,7 +161,6 @@ module.exports = {
                 return;
             }
 
-            // Handle Chats Tab
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -190,7 +188,6 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [chatNavRow, getNavBar()] });
             }
 
-            // Handle Contacts Tab & Pagination
             if (i.customId === 'nav_contacts' || i.customId === 'page_prev' || i.customId === 'page_next') {
                 let page = currentData[userId].currentPage || 0;
                 
@@ -253,7 +250,6 @@ module.exports = {
                 return await i.update({ embeds: [contactEmbed], components: components });
             }
 
-            // Handle Network Tab
             if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -268,7 +264,6 @@ module.exports = {
                 return await i.update({ embeds: [netEmbed], components: [getNavBar()] });
             }
 
-            // Handle Profile Tab
             if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -278,7 +273,6 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
-            // Handle Contact Selection from Dropdown
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 if (targetId === 'none') return;
