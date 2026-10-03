@@ -65,56 +65,58 @@ module.exports = {
         const collector = message.createMessageComponentCollector({ time: 900_000 });
 
         collector.on('collect', async (i) => {
+            // Handle Modal Submissions Separately
+            if (i.isModalSubmit()) {
+                if (i.customId.startsWith('synd_msg_modal_')) {
+                    const targetId = i.customId.replace('synd_msg_modal_', '');
+                    const messageText = i.fields.getTextInputValue('synd_message_body');
+                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    const currentData = loadSyndicateData();
+                    if (!currentData[userId]) currentData[userId] = { chats: {} };
+                    if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
+
+                    currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    if (!currentData[targetId]) currentData[targetId] = { chats: {} };
+                    if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
+                    currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    saveSyndicateData(currentData);
+
+                    await i.reply({ content: '✅ Message sent successfully!', ephemeral: true });
+
+                    const targetMember = guild.members.cache.get(targetId);
+                    const targetName = targetMember ? targetMember.user.username : 'User';
+                    const conversation = currentData[userId].chats[targetId] || [];
+
+                    let chatHistory = conversation.map(m => {
+                        const isMe = m.sender === userId;
+                        return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**:${m.text}`;
+                    }).join('\n\n');
+
+                    const activeChatEmbed = new EmbedBuilder()
+                        .setColor(0x00FF66)
+                        .setTitle(`💬 Chat // ${targetName}`)
+                        .setDescription(chatHistory)
+                        .setFooter({ text: 'online • encrypted link' });
+
+                    const chatActionRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                        new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    );
+
+                    return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
+                }
+                return;
+            }
+
             if (i.user.id !== userId) {
                 return await i.reply({ content: '❌ This device is locked. It is not your terminal.', ephemeral: true });
             }
 
             const currentData = loadSyndicateData();
 
-            // 1. Handle Modal Submission FIRST & INSTANTLY to prevent timeout errors
-            if (i.isModalSubmit() && i.customId.startsWith('synd_msg_modal_')) {
-                const targetId = i.customId.replace('synd_msg_modal_', '');
-                const messageText = i.fields.getTextInputValue('synd_message_body');
-                const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                if (!currentData[userId]) currentData[userId] = { chats: {} };
-                if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
-
-                currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
-
-                if (!currentData[targetId]) currentData[targetId] = { chats: {} };
-                if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-                currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
-
-                saveSyndicateData(currentData);
-
-                // Acknowledge modal safely right away
-                await i.deferUpdate();
-
-                const targetMember = guild.members.cache.get(targetId);
-                const targetName = targetMember ? targetMember.user.username : 'User';
-                const conversation = currentData[userId].chats[targetId] || [];
-
-                let chatHistory = conversation.map(m => {
-                    const isMe = m.sender === userId;
-                    return isMe ? `🟢 ` + '`' + m.time + '`' + `\n💬 **You**: ${m.text}` : `⚪ ` + '`' + m.time + '`' + `\n💬 **${targetName}**:${m.text}`;
-                }).join('\n\n');
-
-                const activeChatEmbed = new EmbedBuilder()
-                    .setColor(0x00FF66)
-                    .setTitle(`💬 Chat // ${targetName}`)
-                    .setDescription(chatHistory)
-                    .setFooter({ text: 'online • encrypted link' });
-
-                const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                    new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-                );
-
-                return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
-            }
-
-            // 2. Open App Main Dashboard & Chats Tab
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -151,7 +153,6 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [selectRow, getNavBar()] });
             }
 
-            // 3. Contacts Tab
             if (i.customId === 'nav_contacts') {
                 const contactsDesc = membersList.map(m => `🟢 **${m.user.username}**\n└ \`online now • verified node\``).join('\n\n');
 
@@ -164,7 +165,6 @@ module.exports = {
                 return await i.update({ embeds: [contactEmbed], components: [getNavBar()] });
             }
 
-            // 4. Network Tab
             if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -179,7 +179,6 @@ module.exports = {
                 return await i.update({ embeds: [netEmbed], components: [getNavBar()] });
             }
 
-            // 5. Profile Tab
             if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -189,7 +188,6 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
-            // 6. Select Menu -> Open Specific Chat View
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -198,7 +196,7 @@ module.exports = {
                 const conversation = currentData[userId]?.chats?.[targetId] || [];
                 let chatHistory = conversation.map(m => {
                     const isMe = m.sender === userId;
-                    return isMe ? `🟢 ` + '`' + m.time + '`' + `\n💬 **You**: ${m.text}` : `⚪ ` + '`' + m.time + '`' + `\n💬 **${targetName}**: ${m.text}`;
+                    return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**: ${m.text}`;
                 }).join('\n\n');
 
                 if (!chatHistory) chatHistory = 'No messages yet. Send the first node transmission below.';
@@ -217,7 +215,6 @@ module.exports = {
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
 
-            // 7. Trigger Modal from Chat View
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
