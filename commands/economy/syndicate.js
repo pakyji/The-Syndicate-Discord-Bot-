@@ -71,27 +71,6 @@ module.exports = {
 
             const currentData = loadSyndicateData();
 
-            // Handle direct contact message button clicks
-            if (i.customId && i.customId.startsWith('contact_msg_')) {
-                const targetId = i.customId.replace('contact_msg_', '');
-                const targetMember = guild.members.cache.get(targetId);
-                const targetName = targetMember ? targetMember.user.username : 'User';
-
-                const modal = new ModalBuilder()
-                    .setCustomId(`synd_msg_modal_${targetId}`)
-                    .setTitle(`Chat with ${targetName}`);
-
-                const msgInput = new TextInputBuilder()
-                    .setCustomId('synd_message_body')
-                    .setLabel('Type your message:')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setPlaceholder('Type your encrypted message here...')
-                    .setRequired(true);
-
-                modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
-                return await i.showModal(modal);
-            }
-
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -149,25 +128,15 @@ module.exports = {
             }
 
             if (i.customId === 'nav_contacts') {
-                const contactsListArray = Array.from(membersList.values()).slice(0, 5); // Display first 5 contacts with direct buttons to avoid component row limits
-
-                const contactsDesc = contactsListArray.map(m => `🟢 **${m.user.username}** — \`online\``).join('\n\n');
+                const contactsDesc = membersList.map(m => `🟢 **${m.user.username}** — \`online\``).join('\n\n');
 
                 const contactEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
-                    .setTitle(`👥 SYNDICATE // CONTACTS`)
-                    .setDescription(contactsDesc || 'No verified members.')
-                    .setFooter({ text: 'Tap buttons below to message contacts directly.' });
+                    .setTitle(`👥 SYNDICATE // CONTACTS (${membersList.size})`)
+                    .setDescription(contactsDesc.substring(0, 4000) || 'No verified members.')
+                    .setFooter({ text: 'Go to Chats tab to select and message any member.' });
 
-                const contactRows = contactsListArray.map(m => 
-                    new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`contact_msg_${m.id}`).setLabel(`Message ${m.user.username}`.substring(0, 80)).setStyle(ButtonStyle.Success).setEmoji('💬')
-                    )
-                );
-
-                contactRows.push(getNavBar());
-
-                return await i.update({ embeds: [contactEmbed], components: contactRows });
+                return await i.update({ embeds: [contactEmbed], components: [getNavBar()] });
             }
 
             if (i.customId === 'nav_network') {
@@ -213,7 +182,7 @@ module.exports = {
                     .setFooter({ text: 'online • encrypted link' });
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
@@ -277,7 +246,7 @@ module.exports = {
                     .setFooter({ text: 'online • encrypted link' });
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
