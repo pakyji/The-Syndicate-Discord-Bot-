@@ -62,14 +62,7 @@ module.exports = {
 
         const message = await interaction.editReply({ embeds: [homeEmbed], components: [homeRow] });
 
-        // Create a collector that listens to BOTH components and modals if possible, 
-        // or we handle modal submissions by listening to client/global collector events.
         const collector = message.createMessageComponentCollector({ time: 900_000 });
-
-        // Since a message component collector doesn't catch modals, we listen to client-level modal submissions 
-        // filtered for this specific user and modal prefix during the active session.
-        const filter = (modalInt) => modalInt.customId.startsWith('synd_msg_modal_') && modalInt.user.id === userId;
-        const modalCollector = interaction.channel.createMessageComponentCollector ? null : null; // alternative approach below
 
         collector.on('collect', async (i) => {
             if (i.user.id !== userId) {
@@ -78,7 +71,6 @@ module.exports = {
 
             const currentData = loadSyndicateData();
 
-            // 1. Open Modal Trigger
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -99,7 +91,6 @@ module.exports = {
                 return await i.showModal(modal);
             }
 
-            // 2. Navigation & App Menus
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -199,8 +190,8 @@ module.exports = {
             }
         });
 
-        // Separate global client collector listener for the modal submission to prevent any "Something went wrong" crashes
-        const clientModalCollector = interaction.client.on('interactionCreate', async (modalInt) => {
+        // Global Client Listener for Modal Submissions + Real DM Notifications
+        interaction.client.on('interactionCreate', async (modalInt) => {
             if (!modalInt.isModalSubmit()) return;
             if (!modalInt.customId.startsWith('synd_msg_modal_')) return;
             if (modalInt.user.id !== userId) return;
@@ -224,6 +215,23 @@ module.exports = {
 
                 await modalInt.deferUpdate();
 
+                // Send real DM notification to the target user!
+                try {
+                    const targetUser = await interaction.client.users.fetch(targetId);
+                    if (targetUser) {
+                        const notifEmbed = new EmbedBuilder()
+                            .setColor(0x00FF66)
+                            .setTitle('📱 NEW SYNDICATE TRANSMISSION')
+                            .setDescription(`Aapko **${interaction.user.username}** ki taraf se ek naya message mila hai!\n\n> "${messageText}"`)
+                            .setFooter({ text: 'Server mein /syndicate command chala kar reply karein.' })
+                            .setTimestamp();
+
+                        await targetUser.send({ embeds: [notifEmbed] });
+                    }
+                } catch (dmErr) {
+                    console.log('Could not send DM to user (DMs might be closed):', dmErr);
+                }
+
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
                 const conversation = currentData[userId].chats[targetId] || [];
@@ -246,12 +254,8 @@ module.exports = {
 
                 await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
             } catch (err) {
-                console.error('Modal error:', err);
+                console.error('Modal notification error:', err);
             }
-        });
-
-        collector.on('end', () => {
-            // Cleanup listener if needed or let it timeout naturally
         });
     },
 };
