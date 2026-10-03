@@ -215,7 +215,7 @@ module.exports = {
                     .setFooter({ text: 'online • encrypted link' });
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️️'),
                     new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
@@ -245,7 +245,6 @@ module.exports = {
 
                 saveSyndicateData(currentData);
 
-                // Modal response ko turant acknowledge karein taaki timeout na ho
                 await modalInt.deferUpdate();
 
                 try {
@@ -284,11 +283,10 @@ module.exports = {
                     new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
-                // Main interaction message ko edit karke updated chat screen dikhayein
                 await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
             } catch (err) {
                 console.error('Modal notification error:', err);
             }
         });
     },
-};
+};                             
