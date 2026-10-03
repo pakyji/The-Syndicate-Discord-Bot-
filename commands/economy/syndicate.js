@@ -35,7 +35,6 @@ module.exports = {
             saveSyndicateData(data);
         }
 
-        // Global Navigation Bar for main tabs only
         function getNavBar() {
             return new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('nav_chats').setLabel('Chats').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
@@ -72,7 +71,7 @@ module.exports = {
 
             const currentData = loadSyndicateData();
 
-            // Handle Modal Submissions
+            // 1. Handle Modal Submission FIRST & INSTANTLY to prevent timeout errors
             if (i.isModalSubmit() && i.customId.startsWith('synd_msg_modal_')) {
                 const targetId = i.customId.replace('synd_msg_modal_', '');
                 const messageText = i.fields.getTextInputValue('synd_message_body');
@@ -89,7 +88,8 @@ module.exports = {
 
                 saveSyndicateData(currentData);
 
-                await i.reply({ content: `✅ Encrypted message transmitted successfully.`, ephemeral: true });
+                // Acknowledge modal safely right away
+                await i.deferUpdate();
 
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
@@ -100,24 +100,21 @@ module.exports = {
                     return isMe ? `🟢 ` + '`' + m.time + '`' + `\n💬 **You**: ${m.text}` : `⚪ ` + '`' + m.time + '`' + `\n💬 **${targetName}**:${m.text}`;
                 }).join('\n\n');
 
-                if (!chatHistory) chatHistory = 'No messages yet. Send the first node transmission below.';
-
                 const activeChatEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
                     .setTitle(`💬 Chat // ${targetName}`)
                     .setDescription(chatHistory)
                     .setFooter({ text: 'online • encrypted link' });
 
-                // Active chat view uses ONLY unique button IDs to prevent duplication crashes
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
 
-            // Open App Main Dashboard & Chats Tab
+            // 2. Open App Main Dashboard & Chats Tab
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -154,7 +151,7 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [selectRow, getNavBar()] });
             }
 
-            // Contacts Tab
+            // 3. Contacts Tab
             if (i.customId === 'nav_contacts') {
                 const contactsDesc = membersList.map(m => `🟢 **${m.user.username}**\n└ \`online now • verified node\``).join('\n\n');
 
@@ -167,7 +164,7 @@ module.exports = {
                 return await i.update({ embeds: [contactEmbed], components: [getNavBar()] });
             }
 
-            // Network Tab
+            // 4. Network Tab
             if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -182,7 +179,7 @@ module.exports = {
                 return await i.update({ embeds: [netEmbed], components: [getNavBar()] });
             }
 
-            // Profile Tab
+            // 5. Profile Tab
             if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -192,7 +189,7 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
-            // Select Menu -> Open Specific Chat View
+            // 6. Select Menu -> Open Specific Chat View
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -212,16 +209,15 @@ module.exports = {
                     .setDescription(chatHistory)
                     .setFooter({ text: 'online • encrypted link' });
 
-                // Active chat view uses ONLY unique button IDs
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
 
-            // Trigger Modal from Chat View
+            // 7. Trigger Modal from Chat View
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
@@ -233,7 +229,7 @@ module.exports = {
 
                 const msgInput = new TextInputBuilder()
                     .setCustomId('synd_message_body')
-                    .setLabel('Message likhein:')
+                    .setLabel('Type your message:')
                     .setStyle(TextInputStyle.Paragraph)
                     .setPlaceholder('Type your encrypted message here...')
                     .setRequired(true);
