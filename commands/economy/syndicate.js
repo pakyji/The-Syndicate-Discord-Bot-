@@ -21,7 +21,9 @@ module.exports = {
         .setDescription('Open the secure Syndicate mobile app interface.'),
 
     async execute(interaction) {
-        await interaction.deferReply({ ephemeral: true });
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply({ ephemeral: true });
+        }
 
         const userId = interaction.user.id;
         const guild = interaction.guild;
@@ -75,13 +77,15 @@ module.exports = {
             const currentData = loadSyndicateData();
             if (!currentData[userId]) currentData[userId] = { chats: {}, currentPage: 0 };
 
+            // Handle Modal Opening via Button
             if (i.customId && i.customId.startsWith('syn_send_')) {
                 const targetId = i.customId.replace('syn_send_', '');
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
 
+                const modalCustomId = `synd_modal_${userId}_${Date.now()}`;
                 const modal = new ModalBuilder()
-                    .setCustomId(`synd_msg_modal_${targetId}`)
+                    .setCustomId(modalCustomId)
                     .setTitle(`Chat with ${targetName}`);
 
                 const msgInput = new TextInputBuilder()
@@ -92,9 +96,73 @@ module.exports = {
                     .setRequired(true);
 
                 modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
-                return await i.showModal(modal);
+                
+                await i.showModal(modal);
+
+                try {
+                    const modalInt = await i.awaitModalSubmit({
+                        filter: (m) => m.customId === modalCustomId && m.user.id === userId,
+                        time: 300_000
+                    });
+
+                    const messageText = modalInt.fields.getTextInputValue('synd_message_body');
+                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    const freshData = loadSyndicateData();
+                    if (!freshData[userId]) freshData[userId] = { chats: {} };
+                    if (!freshData[userId].chats[targetId]) freshData[userId].chats[targetId] = [];
+
+                    freshData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    if (!freshData[targetId]) freshData[targetId] = { chats: {} };
+                    if (!freshData[targetId].chats[userId]) freshData[targetId].chats[userId] = [];
+                    freshData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
+
+                    saveSyndicateData(freshData);
+
+                    await modalInt.deferUpdate();
+
+                    try {
+                        const targetUser = await interaction.client.users.fetch(targetId);
+                        if (targetUser) {
+                            const notifEmbed = new EmbedBuilder()
+                                .setColor(0x00FF66)
+                                .setTitle('📱 NEW SYNDICATE TRANSMISSION')
+                                .setDescription(`You received a new message from **${interaction.user.username}**!\n\n> "${messageText}"`)
+                                .setFooter({ text: 'Run /syndicate in the server to reply.' })
+                                .setTimestamp();
+
+                            await targetUser.send({ embeds: [notifEmbed] });
+                        }
+                    } catch (dmErr) {
+                        console.log('Could not send DM notification:', dmErr);
+                    }
+
+                    const conversation = freshData[userId].chats[targetId] || [];
+                    let chatHistory = conversation.map(m => {
+                        const isMe = m.sender === userId;
+                        return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**:${m.text}`;
+                    }).join('\n\n');
+
+                    const activeChatEmbed = new EmbedBuilder()
+                        .setColor(0x00FF66)
+                        .setTitle(`💬 Chat // ${targetName}`)
+                        .setDescription(chatHistory)
+                        .setFooter({ text: 'online • encrypted link' });
+
+                    const chatActionRow = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
+                        new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
+                    );
+
+                    await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
+                } catch (modalErr) {
+                    console.log('Modal submission error or timeout:', modalErr);
+                }
+                return;
             }
 
+            // Handle Chats Tab
             if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
@@ -122,6 +190,7 @@ module.exports = {
                 return await i.update({ embeds: [appEmbed], components: [chatNavRow, getNavBar()] });
             }
 
+            // Handle Contacts Tab & Pagination
             if (i.customId === 'nav_contacts' || i.customId === 'page_prev' || i.customId === 'page_next') {
                 let page = currentData[userId].currentPage || 0;
                 
@@ -184,6 +253,7 @@ module.exports = {
                 return await i.update({ embeds: [contactEmbed], components: components });
             }
 
+            // Handle Network Tab
             if (i.customId === 'nav_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -198,6 +268,7 @@ module.exports = {
                 return await i.update({ embeds: [netEmbed], components: [getNavBar()] });
             }
 
+            // Handle Profile Tab
             if (i.customId === 'nav_profile') {
                 const profileEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
@@ -207,6 +278,7 @@ module.exports = {
                 return await i.update({ embeds: [profileEmbed], components: [getNavBar()] });
             }
 
+            // Handle Contact Selection from Dropdown
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
                 if (targetId === 'none') return;
@@ -235,71 +307,5 @@ module.exports = {
                 return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
         });
-
-        const filter = (modalInt) => modalInt.customId.startsWith('synd_msg_modal_') && modalInt.user.id === userId;
-        
-        message.awaitModalSubmit({ filter, time: 900_000 })
-            .then(async (modalInt) => {
-                try {
-                    const targetId = modalInt.customId.replace('synd_msg_modal_', '');
-                    const messageText = modalInt.fields.getTextInputValue('synd_message_body');
-                    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-                    const currentData = loadSyndicateData();
-                    if (!currentData[userId]) currentData[userId] = { chats: {} };
-                    if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
-
-                    currentData[userId].chats[targetId].push({ sender: userId, text: messageText, time: timestamp });
-
-                    if (!currentData[targetId]) currentData[targetId] = { chats: {} };
-                    if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-                    currentData[targetId].chats[userId].push({ sender: userId, text: messageText, time: timestamp });
-
-                    saveSyndicateData(currentData);
-
-                    await modalInt.deferUpdate();
-
-                    try {
-                        const targetUser = await interaction.client.users.fetch(targetId);
-                        if (targetUser) {
-                            const notifEmbed = new EmbedBuilder()
-                                .setColor(0x00FF66)
-                                .setTitle('📱 NEW SYNDICATE TRANSMISSION')
-                                .setDescription(`You received a new message from **${interaction.user.username}**!\n\n> "${messageText}"`)
-                                .setFooter({ text: 'Run /syndicate in the server to reply.' })
-                                .setTimestamp();
-
-                            await targetUser.send({ embeds: [notifEmbed] });
-                        }
-                    } catch (dmErr) {
-                        console.log('Could not send DM notification:', dmErr);
-                    }
-
-                    const targetMember = guild.members.cache.get(targetId);
-                    const targetName = targetMember ? targetMember.user.username : 'User';
-                    const conversation = currentData[userId].chats[targetId] || [];
-
-                    let chatHistory = conversation.map(m => {
-                        const isMe = m.sender === userId;
-                        return isMe ? `🟢 \`${m.time}\`\n💬 **You**: ${m.text}` : `⚪ \`${m.time}\`\n💬 **${targetName}**: ${m.text}`;
-                    }).join('\n\n');
-
-                    const activeChatEmbed = new EmbedBuilder()
-                        .setColor(0x00FF66)
-                        .setTitle(`💬 Chat // ${targetName}`)
-                        .setDescription(chatHistory)
-                        .setFooter({ text: 'online • encrypted link' });
-
-                    const chatActionRow = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
-                        new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
-                    );
-
-                    await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
-                } catch (err) {
-                    console.error('Modal submission processing error:', err);
-                }
-            })
-            .catch(() => {});
     },
 };
