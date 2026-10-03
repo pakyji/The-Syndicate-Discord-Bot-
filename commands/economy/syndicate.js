@@ -71,7 +71,7 @@ module.exports = {
         // Collector for interaction handling
         const collector = message.createMessageComponentCollector({ time: 300_000 }); // 5 minutes
 
-        collector.on('collect, async (i) => {
+        collector.on('collect', async (i) => {
             if (i.user.id !== userId) {
                 return await i.reply({ content: '❌ Yeh phone sirf aapka hai!', ephemeral: true });
             }
