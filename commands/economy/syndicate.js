@@ -120,7 +120,7 @@ module.exports = {
                 const selectRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
                         .setCustomId('select_chat_target')
-                        .setPlaceholder('Search chats or tap to select...')
+                        .setPlaceholder('Select a chat to open...')
                         .addOptions(options.length > 0 ? options : [{ label: 'No members available', value: 'none' }])
                 );
 
@@ -134,9 +134,22 @@ module.exports = {
                     .setColor(0x00FF66)
                     .setTitle(`👥 SYNDICATE // CONTACTS (${membersList.size})`)
                     .setDescription(contactsDesc.substring(0, 4000) || 'No verified members.')
-                    .setFooter({ text: 'Go to Chats tab to select and message any member.' });
+                    .setFooter({ text: 'Select a contact from the menu below to message them.' });
 
-                return await i.update({ embeds: [contactEmbed], components: [getNavBar()] });
+                const options = membersList.map(m => ({
+                    label: m.user.username.substring(0, 25),
+                    value: `chat_${m.id}`,
+                    description: 'Start secure chat'
+                })).slice(0, 25);
+
+                const selectRow = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder()
+                        .setCustomId('select_chat_target')
+                        .setPlaceholder('Select a contact to message...')
+                        .addOptions(options.length > 0 ? options : [{ label: 'No members available', value: 'none' }])
+                );
+
+                return await i.update({ embeds: [contactEmbed], components: [selectRow, getNavBar()] });
             }
 
             if (i.customId === 'nav_network') {
@@ -164,6 +177,7 @@ module.exports = {
 
             if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
                 const targetId = i.values[0].replace('chat_', '');
+                if (targetId === 'none') return;
                 const targetMember = guild.members.cache.get(targetId);
                 const targetName = targetMember ? targetMember.user.username : 'User';
 
@@ -182,7 +196,7 @@ module.exports = {
                     .setFooter({ text: 'online • encrypted link' });
 
                 const chatActionRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️️'),
+                    new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Send Message').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
