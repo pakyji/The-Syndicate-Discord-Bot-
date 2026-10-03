@@ -190,7 +190,6 @@ module.exports = {
             }
         });
 
-        // Global Client Listener for Modal Submissions + Real DM Notifications
         interaction.client.on('interactionCreate', async (modalInt) => {
             if (!modalInt.isModalSubmit()) return;
             if (!modalInt.customId.startsWith('synd_msg_modal_')) return;
@@ -215,21 +214,20 @@ module.exports = {
 
                 await modalInt.deferUpdate();
 
-                // Send real DM notification to the target user!
                 try {
                     const targetUser = await interaction.client.users.fetch(targetId);
                     if (targetUser) {
                         const notifEmbed = new EmbedBuilder()
                             .setColor(0x00FF66)
                             .setTitle('📱 NEW SYNDICATE TRANSMISSION')
-                            .setDescription(`Aapko **${interaction.user.username}** ki taraf se ek naya message mila hai!\n\n> "${messageText}"`)
-                            .setFooter({ text: 'Server mein /syndicate command chala kar reply karein.' })
+                            .setDescription(`You received a new message from **${interaction.user.username}**!\n\n> "${messageText}"`)
+                            .setFooter({ text: 'Run /syndicate in the server to reply.' })
                             .setTimestamp();
 
                         await targetUser.send({ embeds: [notifEmbed] });
                     }
                 } catch (dmErr) {
-                    console.log('Could not send DM to user (DMs might be closed):', dmErr);
+                    console.log('Could not send DM notification:', dmErr);
                 }
 
                 const targetMember = guild.members.cache.get(targetId);
