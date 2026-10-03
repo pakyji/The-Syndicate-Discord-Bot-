@@ -26,7 +26,6 @@ module.exports = {
         const userId = interaction.user.id;
         const guild = interaction.guild;
 
-        // Fetch verified members (excluding bots)
         await guild.members.fetch();
         const membersList = guild.members.cache.filter(m => !m.user.bot);
 
@@ -68,21 +67,26 @@ module.exports = {
 
         const message = await interaction.editReply({ embeds: [embed], components: [row] });
 
-        // Collector for interaction handling
-        const collector = message.createMessageComponentCollector({ time: 300_000 }); // 5 minutes
+        const collector = message.createMessageComponentCollector({ time: 600_000 }); // 10 minutes
 
         collector.on('collect', async (i) => {
             if (i.user.id !== userId) {
-                return await i.reply({ content: '❌ Yeh phone sirf aapka hai!', ephemeral: true });
+                return await i.reply({ content: '❌ This phone belongs to someone else!', ephemeral: true });
             }
 
             const currentData = loadSyndicateData();
 
+            // 1. Home Button
+            if (i.customId === 'syn_home') {
+                return await i.update({ embeds: [embed], components: [row] });
+            }
+
+            // 2. Chats Button
             if (i.customId === 'syn_chats') {
                 const userChats = currentData[userId]?.chats || {};
                 const chatKeys = Object.keys(userChats);
 
-                let chatDesc = 'Aapki koi active chat nahi hai. Verified Contacts mein jaakar kisi ko message bhejein!';
+                let chatDesc = 'No active chats yet. Go to Verified Contacts to start a conversation!';
                 if (chatKeys.length > 0) {
                     chatDesc = chatKeys.map(targetId => {
                         const targetUser = guild.members.cache.get(targetId)?.user;
@@ -97,12 +101,11 @@ module.exports = {
                     .setTitle('💬 Syndicate // Recent Chats')
                     .setDescription(chatDesc);
 
-                // Build select menu for contacts to chat with
                 const options = membersList.map(m => ({
                     label: m.user.username.substring(0, 25),
                     value: `chat_${m.id}`,
                     description: 'Open encrypted chat line'
-                })).slice(0, 25); // Discord limit 25
+                })).slice(0, 25);
 
                 const selectRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder()
@@ -115,10 +118,59 @@ module.exports = {
                     new ButtonBuilder().setCustomId('syn_home').setLabel('Home').setStyle(ButtonStyle.Primary).setEmoji('🏠')
                 );
 
-                await i.update({ embeds: [chatEmbed], components: [selectRow, backRow] });
+                return await i.update({ embeds: [chatEmbed], components: [selectRow, backRow] });
             }
 
-            else if (i.customId === 'syn_contacts') {
+            // 3. Select Menu (Choose user to message)
+            if (i.isStringSelectMenu() && i.customId === 'select_chat_target') {
+                const targetId = i.values[0].replace('chat_', '');
+                const targetMember = guild.members.cache.get(targetId);
+                const targetName = targetMember ? targetMember.user.username : 'User';
+
+                const modal = new ModalBuilder()
+                    .setCustomId(`synd_msg_modal_${targetId}`)
+                    .setTitle(`Chat with ${targetName}`);
+
+                const msgInput = new TextInputBuilder()
+                    .setCustomId('synd_message_body')
+                    .setLabel('Type your message:')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Type your encrypted message here...')
+                    .setRequired(true);
+
+                modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
+                return await i.showModal(modal);
+            }
+
+            // 4. Modal Submit (Save message permanently)
+            if (i.isModalSubmit() && i.customId.startsWith('synd_msg_modal_')) {
+                const targetId = i.customId.replace('synd_msg_modal_', '');
+                const messageText = i.fields.getTextInputValue('synd_message_body');
+
+                if (!currentData[userId]) currentData[userId] = { chats: {} };
+                if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
+
+                currentData[userId].chats[targetId].push({
+                    sender: userId,
+                    text: messageText,
+                    time: new Date().toLocaleTimeString()
+                });
+
+                if (!currentData[targetId]) currentData[targetId] = { chats: {} };
+                if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
+                currentData[targetId].chats[userId].push({
+                    sender: userId,
+                    text: messageText,
+                    time: new Date().toLocaleTimeString()
+                });
+
+                saveSyndicateData(currentData);
+
+                return await i.reply({ content: `✅ Message securely sent and saved to the Syndicate database!`, ephemeral: true });
+            }
+
+            // 5. Contacts Button
+            if (i.customId === 'syn_contacts') {
                 let contactsText = membersList.map(m => `🟢 **${m.user.username}** — \`linked & verified\``).join('\n');
                 if (!contactsText) contactsText = 'No verified members found.';
 
@@ -131,10 +183,11 @@ module.exports = {
                     new ButtonBuilder().setCustomId('syn_home').setLabel('Home').setStyle(ButtonStyle.Primary).setEmoji('🏠')
                 );
 
-                await i.update({ embeds: [contactEmbed], components: [backRow] });
+                return await i.update({ embeds: [contactEmbed], components: [backRow] });
             }
 
-            else if (i.customId === 'syn_network') {
+            // 6. Network Button
+            if (i.customId === 'syn_network') {
                 const netEmbed = new EmbedBuilder()
                     .setColor(0x00FF66)
                     .setTitle('📡 Syndicate // Network Nodes')
@@ -148,70 +201,8 @@ module.exports = {
                     new ButtonBuilder().setCustomId('syn_home').setLabel('Home').setStyle(ButtonStyle.Primary).setEmoji('🏠')
                 );
 
-                await i.update({ embeds: [netEmbed], components: [backRow] });
+                return await i.update({ embeds: [netEmbed], components: [backRow] });
             }
-
-            else if (i.customId === 'syn_home') {
-                await i.update({ embeds: [embed], components: [row] });
-            }
-        });
-
-        // Handle Select Menu and Modals for Messaging
-        client.on('interactionCreate', async (menuInteraction) => {
-            if (!menuInteraction.isStringSelectMenu() || menuInteraction.customId !== 'select_chat_target') return;
-            if (menuInteraction.user.id !== userId) return;
-
-            const targetId = menuInteraction.values[0].replace('chat_', '');
-            const targetMember = guild.members.cache.get(targetId);
-            const targetName = targetMember ? targetMember.user.username : 'User';
-
-            // Open Modal to type message
-            const modal = new ModalBuilder()
-                .setCustomId(`synd_msg_modal_${targetId}`)
-                .setTitle(`Chat with ${targetName}`);
-
-            const msgInput = new TextInputBuilder()
-                .setCustomId('synd_message_body')
-                .setLabel('Message likhein:')
-                .setStyle(TextInputStyle.Paragraph)
-                .setPlaceholder('Type your encrypted message here...')
-                .setRequired(true);
-
-            modal.addComponents(new ActionRowBuilder().addComponents(msgInput));
-            await menuInteraction.showModal(modal);
-        });
-
-        // Handle Modal Submit to save messages permanently
-        client.on('interactionCreate', async (modalInteraction) => {
-            if (!modalInteraction.isModalSubmit() || !modalInteraction.customId.startsWith('synd_msg_modal_')) return;
-            if (modalInteraction.user.id !== userId) return;
-
-            const targetId = modalInteraction.customId.replace('synd_msg_modal_', '');
-            const messageText = modalInteraction.fields.getTextInputValue('synd_message_body');
-
-            const currentData = loadSyndicateData();
-            if (!currentData[userId]) currentData[userId] = { chats: {} };
-            if (!currentData[userId].chats[targetId]) currentData[userId].chats[targetId] = [];
-
-            // Save message permanently in storage
-            currentData[userId].chats[targetId].push({
-                sender: userId,
-                text: messageText,
-                time: new Date().toLocaleTimeString()
-            });
-
-            // Also mirror it for receiver so they can see it too
-            if (!currentData[targetId]) currentData[targetId] = { chats: {} };
-            if (!currentData[targetId].chats[userId]) currentData[targetId].chats[userId] = [];
-            currentData[targetId].chats[userId].push({
-                sender: userId,
-                text: messageText,
-                time: new Date().toLocaleTimeString()
-            });
-
-            saveSyndicateData(currentData);
-
-            await modalInteraction.reply({ content: `✅ Message securely sent and saved to Syndicate database!`, ephemeral: true });
         });
     },
 };
