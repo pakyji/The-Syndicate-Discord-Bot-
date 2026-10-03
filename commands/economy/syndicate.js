@@ -35,7 +35,7 @@ module.exports = {
             saveSyndicateData(data);
         }
 
-        // Unique navigation bar IDs to prevent duplication conflicts
+        // Global Navigation Bar for main tabs only
         function getNavBar() {
             return new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId('nav_chats').setLabel('Chats').setStyle(ButtonStyle.Secondary).setEmoji('💬'),
@@ -108,12 +108,13 @@ module.exports = {
                     .setDescription(chatHistory)
                     .setFooter({ text: 'online • encrypted link' });
 
+                // Active chat view uses ONLY unique button IDs to prevent duplication crashes
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
-                return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow, getNavBar()] });
+                return await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
 
             // Open App Main Dashboard & Chats Tab
@@ -211,12 +212,13 @@ module.exports = {
                     .setDescription(chatHistory)
                     .setFooter({ text: 'online • encrypted link' });
 
+                // Active chat view uses ONLY unique button IDs
                 const chatActionRow = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`syn_send_${targetId}`).setLabel('Message likhein...').setStyle(ButtonStyle.Success).setEmoji('✍️'),
                     new ButtonBuilder().setCustomId('nav_chats').setLabel('Back to Chats').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
-                return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow, getNavBar()] });
+                return await i.update({ embeds: [activeChatEmbed], components: [chatActionRow] });
             }
 
             // Trigger Modal from Chat View
