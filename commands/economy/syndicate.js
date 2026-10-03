@@ -91,7 +91,34 @@ module.exports = {
                 return await i.showModal(modal);
             }
 
-            if (i.customId === 'syn_open_app' || i.customId === 'nav_chats' || (i.customId && i.customId.startsWith('contacts_page_'))) {
+            if (i.customId === 'syn_open_app' || i.customId === 'nav_chats') {
+                const userChats = currentData[userId]?.chats || {};
+                const chatKeys = Object.keys(userChats);
+
+                let chatsListDesc = 'No active chat nodes found. Open Contacts to start a secure link.';
+                if (chatKeys.length > 0) {
+                    chatsListDesc = chatKeys.map(targetId => {
+                        const targetUser = guild.members.cache.get(targetId)?.user;
+                        const username = targetUser ? targetUser.username : 'Unknown Node';
+                        const lastMsg = userChats[targetId].slice(-1)[0];
+                        return `💬 **${username}**\n└ *${lastMsg ? lastMsg.text : 'No history'}* — \`online\``;
+                    }).join('\n\n');
+                }
+
+                const appEmbed = new EmbedBuilder()
+                    .setColor(0x00FF66)
+                    .setTitle('📱 SYNDICATE // CHATS')
+                    .setDescription(chatsListDesc)
+                    .setFooter({ text: 'Select a member from Contacts tab to chat' });
+
+                const chatNavRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('nav_contacts').setLabel('Go to Contacts').setStyle(ButtonStyle.Success).setEmoji('👥')
+                );
+
+                return await i.update({ embeds: [appEmbed], components: [chatNavRow, getNavBar()] });
+            }
+
+            if (i.customId === 'nav_contacts' || (i.customId && i.customId.startsWith('contacts_page_'))) {
                 let page = 0;
                 if (i.customId && i.customId.startsWith('contacts_page_')) {
                     page = parseInt(i.customId.replace('contacts_page_', '')) || 0;
@@ -100,7 +127,7 @@ module.exports = {
                 const start = page * 25;
                 const end = start + 25;
                 const paginatedMembers = membersList.slice(start, end);
-                const maxPages = Math.ceil(membersList.length / 25);
+                const maxPages = Math.ceil(membersList.length / 25) || 1;
 
                 const contactsDesc = paginatedMembers.map(m => `🟢 **${m.user.username}** — \`online\``).join('\n\n');
 
@@ -126,12 +153,12 @@ module.exports = {
                 const paginationRow = new ActionRowBuilder();
                 if (page > 0) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId(`contacts_page_${page - 1}`).setLabel('Previous Page').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
+                        new ButtonBuilder().setCustomId(`contacts_page_${page - 1}`).setLabel('Previous').setStyle(ButtonStyle.Primary).setEmoji('⬅️')
                     );
                 }
                 if (end < membersList.length) {
                     paginationRow.addComponents(
-                        new ButtonBuilder().setCustomId(`contacts_page_${page + 1}`).setLabel('Next Page').setStyle(ButtonStyle.Primary).setEmoji('➡️')
+                        new ButtonBuilder().setCustomId(`contacts_page_${page + 1}`).setLabel('Next').setStyle(ButtonStyle.Primary).setEmoji('➡️')
                     );
                 }
 
@@ -218,6 +245,7 @@ module.exports = {
 
                 saveSyndicateData(currentData);
 
+                // Modal response ko turant acknowledge karein taaki timeout na ho
                 await modalInt.deferUpdate();
 
                 try {
@@ -256,6 +284,7 @@ module.exports = {
                     new ButtonBuilder().setCustomId('nav_contacts').setLabel('Back to Contacts').setStyle(ButtonStyle.Secondary).setEmoji('⬅️')
                 );
 
+                // Main interaction message ko edit karke updated chat screen dikhayein
                 await interaction.editReply({ embeds: [activeChatEmbed], components: [chatActionRow] });
             } catch (err) {
                 console.error('Modal notification error:', err);
