@@ -17,7 +17,7 @@
 >   section 12 kept finding cannot come back quietly.
 
 ```
-Final diff vs. upstream 7f65d73:  104 files changed, 15939 insertions(+), 3656 deletions(-)
+Final diff vs. upstream 7f65d73:  104 files changed, 16034 insertions(+), 3656 deletions(-)
 Fixed tree:                       84 JS files, ~12,500 lines, 46 commands, 17 event handlers
 ```
 
@@ -766,3 +766,19 @@ edit and an expiry edit. Requested removal (2026-10-15) deleted the scheduler, t
 collector, the `DROP_*` constants, the `autoDrops` config entry and the
 `AUTO_DROP_CHANNEL_ID` env var. `events/ready.js` is now 43 lines: announce, music
 sweep, invite-cache warm-up. No economy command or balance path was touched.
+
+### 13.8 Hotfix 2.2.1 — /music could vanish without a word
+
+`commands/music.js` required `lib/music.js` (which requires `@discordjs/voice` and
+`play-dl`) at load time. On a host that pulled an update but did not run
+`npm install`, that require threw, the loader's try/catch skipped the file, and
+`/music` disappeared from the Discord command list with only one easy-to-miss
+console line as evidence — reported from production as "music wala command hi nhi".
+
+Now the require is guarded: `/music` always registers, and if the voice stack cannot
+load it replies in Discord with the loader's exact error plus the fix (`npm install`,
+restart). The boot log gained a loud `[loader] ❌ N command file(s) FAILED to load —
+their commands are MISSING from Discord` block listing every skipped file. A new
+regression test loads `commands/music.js` in a child process with
+`@discordjs/voice`/`play-dl`/`ffmpeg-static` blocked from resolving and asserts the
+command still loads and exposes `execute()`.

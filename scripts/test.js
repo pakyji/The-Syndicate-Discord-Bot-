@@ -590,6 +590,34 @@ if (fs.existsSync(LIVE_STORE)) {
     t('the pure-JS opus fallback took over where the native binding is unusable', vr.opus === 'opusscript');
   }
 
+  // ⭐ Regression: on a host with NO voice dependencies installed, an unguarded
+  // require of lib/music made the loader skip commands/music.js entirely, so
+  // /music vanished from Discord with only a console line as evidence. The
+  // command must load (and register) even when those packages cannot resolve.
+  t('⭐ /music still loads when the voice dependencies are missing', (() => {
+    const childScript = `
+      const Module = require('module');
+      const orig = Module._load;
+      const BLOCK = ['@discordjs/voice', 'play-dl', 'ffmpeg-static'];
+      Module._load = function (request, ...rest) {
+        if (BLOCK.includes(request)) {
+          const err = new Error('Cannot find module ' + request + ' (simulated)');
+          err.code = 'MODULE_NOT_FOUND';
+          throw err;
+        }
+        return orig.call(this, request, ...rest);
+      };
+      const cmd = require(process.argv[1] + '/commands/music.js');
+      if (!cmd || cmd.data.name !== 'music' || typeof cmd.execute !== 'function') process.exit(3);
+    `;
+    try {
+      require('child_process').execFileSync(process.execPath, ['-e', childScript, ROOT], { stdio: 'pipe' });
+      return true;
+    } catch {
+      return false;
+    }
+  })());
+
   // ⭐ Regression for a false positive this suite caught during development:
   // @discordjs/opus is native, so its folder can be installed while the compiled
   // binding is missing (Android/Termux, `npm install --ignore-scripts`, a blocked

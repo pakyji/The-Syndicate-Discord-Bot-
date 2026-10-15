@@ -39,7 +39,7 @@ git status --short | head -60
 #    -> MUST NOT list: .env, node_modules/, data/store.json, *.patch
 #    -> MUST list:     data/.gitkeep, package-lock.json, CHANGELOG.md, DEPLOY.md
 git diff --cached --stat | tail -5
-#    -> expect roughly: 104 files changed, ~15939 insertions(+), ~3656 deletions(-)
+#    -> expect roughly: 104 files changed, ~16034 insertions(+), ~3656 deletions(-)
 #
 # If the insertion count is in the tens of thousands, a *.patch artifact got staged.
 # .gitignore excludes them; check with:  git ls-files '*.patch'

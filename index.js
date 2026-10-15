@@ -103,6 +103,8 @@ function normaliseCommand(command) {
     return null;
 }
 
+const failedCommandLoads = [];
+
 function loadCommands(dir) {
     let files;
     try {
@@ -132,7 +134,10 @@ function loadCommands(dir) {
         try {
             command = require(filePath);
         } catch (error) {
-            // One broken file must not take the whole bot down.
+            // One broken file must not take the whole bot down — but it must also
+            // never disappear QUIETLY: a skipped file means a command members can
+            // no longer see, which reads as "the bot lost a feature".
+            failedCommandLoads.push({ file: path.relative(__dirname, filePath), message: error.message.split('\n')[0] });
             console.error(`[loader] failed to load command ${filePath}:`, error.message);
             continue;
         }
@@ -236,6 +241,14 @@ loadCommands(path.join(__dirname, 'commands'));
 loadEvents(path.join(__dirname, 'events'));
 
 console.log(`[loader] ${client.commands.size} commands, ${commandsArray.length} to register`);
+if (failedCommandLoads.length) {
+    // ⭐ Loud on purpose: these commands are MISSING from Discord until fixed.
+    console.error(`[loader] ❌ ${failedCommandLoads.length} command file(s) FAILED to load — their commands are MISSING from Discord:`);
+    for (const failed of failedCommandLoads) {
+        console.error(`[loader]    • ${failed.file}: ${failed.message}`);
+    }
+    console.error('[loader]    Usually this means dependencies are not installed: run `npm install` and restart.');
+}
 
 /* ------------------------------------------------------------------ *
  * Slash-command registration (runs once, after ready)

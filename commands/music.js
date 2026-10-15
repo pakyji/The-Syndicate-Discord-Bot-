@@ -18,7 +18,21 @@
  *  • Every reply is ephemeral except the now-playing embed, which the engine posts.
  */
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const music = require('../lib/music');
+
+// ⭐ GUARDED ON PURPOSE. lib/music.js pulls @discordjs/voice + play-dl in at require
+// time. On a host where those are not installed (typically: `git pull` after an
+// update but no `npm install`), an unguarded require THROWS, the loader's try/catch
+// skips this whole file, and /music vanishes from the command list with nothing but
+// a console line nobody reads — exactly the "music wala command hi nhi" symptom.
+// With the guard the command always registers and instead tells the truth, in
+// Discord, the first time someone uses it.
+let music = null;
+let musicLoadError = null;
+try {
+    music = require('../lib/music');
+} catch (error) {
+    musicLoadError = error;
+}
 const config = require('../lib/config');
 
 /**
@@ -135,6 +149,18 @@ module.exports = {
     category: 'Music',
 
     async execute(interaction) {
+        if (!music) {
+            const why = musicLoadError && musicLoadError.message
+                ? musicLoadError.message.split('\n')[0]
+                : 'unknown error';
+            return interaction.reply({
+                content: '❌ The voice stack is not installed on this host, so /music cannot play '
+                    + `anything yet. Loader said: \`${why}\`.\n`
+                    + 'Fix on the host: run `npm install` in the bot directory, then restart the bot '
+                    + '(`npm rebuild` if npm install was already run).',
+                ephemeral: true,
+            });
+        }
         if (!config.music.enabled) {
             return interaction.reply({
                 content: '❌ Music is disabled on this bot (`MUSIC_ENABLED=false`).',

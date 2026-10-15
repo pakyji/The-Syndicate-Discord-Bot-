@@ -12,6 +12,18 @@ boot and announces only when they differ — an ordinary restart stays silent.
 
 ---
 
+## [2.2.1] - 2026-10-15
+
+### Fixed
+- **/music could vanish from the command list without a word.** `commands/music.js`
+  required the voice stack at load time; on a host where `@discordjs/voice`/`play-dl`
+  were not installed (an update pulled without `npm install`) the require threw, the
+  loader skipped the file, and the command silently disappeared from Discord. The
+  require is now guarded: `/music` always registers and, if the stack is missing,
+  replies in Discord with the exact loader error and the fix (`npm install`, restart).
+- The boot log now lists every command file that failed to load as a loud
+  `[loader] ❌ ... MISSING from Discord` block, instead of a single easy-to-miss line.
+
 ## [2.2.0] - 2026-10-15
 
 ### Removed
