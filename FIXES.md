@@ -17,7 +17,7 @@
 >   section 12 kept finding cannot come back quietly.
 
 ```
-Final diff vs. upstream 7f65d73:  104 files changed, 15939 insertions(+), 3618 deletions(-)
+Final diff vs. upstream 7f65d73:  104 files changed, 15939 insertions(+), 3656 deletions(-)
 Fixed tree:                       84 JS files, ~12,500 lines, 46 commands, 17 event handlers
 ```
 
@@ -737,3 +737,32 @@ npm run check && npm start
 Legacy data (`coins.json`, `economyStorage.json`, `syndicateStorage.json`,
 `securityStorage.json`) is migrated automatically into `data/store.json` on first boot,
 then can be deleted.
+### 13.6 Hotfix 2.1.1 — the presence crash loop (found in production, 2026-10-15)
+
+The status-rotation timer in `index.js` called
+`client.user.setPresence(...).catch(() => {})`. In discord.js v14 the presence setters
+(`setPresence`, `setActivity`, `setStatus`) are **synchronous** — they return a `Presence`
+object, not a Promise — so `.catch` is `undefined` and every rotation tick threw
+`TypeError: client.user.setPresence(...).catch is not a function`. An uncaught exception
+inside a `setInterval` callback terminates the process, so the host restart-looped the bot;
+every restart destroyed live voice connections, which is why music appeared dead.
+
+Fixed by routing presence through a guarded synchronous helper (`applyPresence`) wrapped in
+`try/catch` with an optional-chained `client.user?` — presence is cosmetic and can no longer
+take the bot down. `scripts/validate.js` gained a permanent static check that rejects
+`.then()`/`.catch()` chained onto any of the three synchronous setters, proven live by
+re-inserting the bug and watching the validator fail. Version bumped to **2.1.1** with a
+`CHANGELOG.md` entry, so updating hosts announce the fix through the normal
+version-change ritual. Three §25 assertions that hard-coded `v2.1.0`/`Music` were rewritten
+to derive the expected version and changelog bullets at runtime, so future bumps cannot
+break the suite.
+
+
+### 13.7 Removed on request: the 30-minute coin drops (v2.2.0)
+
+`events/ready.js` used to launch a coin drop every `DROP_INTERVAL` (30 minutes) in
+`config.channels.autoDrops`: a claim-button embed, a 30-second collector, a winner
+edit and an expiry edit. Requested removal (2026-10-15) deleted the scheduler, the
+collector, the `DROP_*` constants, the `autoDrops` config entry and the
+`AUTO_DROP_CHANNEL_ID` env var. `events/ready.js` is now 43 lines: announce, music
+sweep, invite-cache warm-up. No economy command or balance path was touched.

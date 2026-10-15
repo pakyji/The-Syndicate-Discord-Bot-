@@ -121,6 +121,14 @@ for (const file of files) {
         errors.push(`${rel}: writes JSON with bare fs.writeFileSync — use lib/store.js (atomic + serialised)`);
     }
 
+    // discord.js v14 presence setters are SYNCHRONOUS (they return a Presence, not a
+    // Promise). Chaining .then()/.catch() on them throws a TypeError at runtime — and
+    // inside a setInterval callback that is an uncaught exception, which restart-loops
+    // the bot and drops every live voice connection. Caught in the wild, 2026-10-15.
+    if (/\.set(Presence|Activity|Status)\((?:[^()]|\([^()]*\))*\)\s*\.(then|catch)\s*\(/.test(codeOnly(src))) {
+        errors.push(`${rel}: chains .then/.catch onto setPresence/setActivity/setStatus — these are synchronous in discord.js v14 and return no Promise`);
+    }
+
     /* ── 8. global regex .test() on a module-scoped RegExp ──── */
     if (!rel.startsWith(`scripts${path.sep}`) && /^const\s+\w+\s*=\s*\/.*\/[a-z]*g[a-z]*;\s*$/m.test(codeOnly(src)) && /\.test\(/.test(codeOnly(src))) {
         warnings.push(`${rel}: module-scoped /g/ RegExp used with .test() — lastIndex persists between calls and alternates true/false`);

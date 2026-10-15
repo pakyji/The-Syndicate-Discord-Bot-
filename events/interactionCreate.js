@@ -727,7 +727,6 @@ module.exports = {
                 if (interaction.customId.startsWith('verify_')) return await handleVerifyButton(interaction);
                 if (interaction.customId === 'gta_sos_start') return await handleSosStart(interaction);
                 if (interaction.customId.startsWith('music_')) return await handleMusicButton(interaction);
-                // claim_coin_auto is handled by its own collector in events/ready.js.
                 return;
             }
 

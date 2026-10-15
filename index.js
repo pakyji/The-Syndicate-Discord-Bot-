@@ -274,11 +274,24 @@ client.once('ready', async () => {
     const statuses = config.statuses.map((name) => ({ name, type: ActivityType.Playing }));
     if (statuses.length) {
         let index = 0;
-        client.user.setPresence({ activities: [statuses[0]], status: 'online' });
+        // ⭐ setPresence()/setActivity()/setStatus() are SYNCHRONOUS in discord.js
+        // v14: they return a Presence object, NOT a Promise. There is nothing to
+        // .catch() — and an earlier version did exactly that, so every rotation tick
+        // threw `TypeError: ...catch is not a function` inside this timer. An
+        // uncaught exception in a timer callback kills the whole process, so the
+        // host restart-looped the bot and every restart dropped live voice
+        // connections (which is why music "never played"). Presence is cosmetic:
+        // it must never be able to take the bot down.
+        const applyPresence = (activity) => {
+            try {
+                client.user?.setPresence({ activities: [activity], status: 'online' });
+            } catch { /* cosmetic only — never worth a restart */ }
+        };
+        applyPresence(statuses[0]);
 
         const timer = setInterval(() => {
             index = (index + 1) % statuses.length;
-            client.user.setPresence({ activities: [statuses[index]], status: 'online' }).catch(() => {});
+            applyPresence(statuses[index]);
         }, config.statusRotateMs);
         timer.unref?.();
     }

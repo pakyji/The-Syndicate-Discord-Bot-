@@ -805,7 +805,7 @@ if (fs.existsSync(LIVE_STORE)) {
     };
   }
 
-  // Start from a clean slate: nothing announced yet, running v2.1.0.
+  // Start from a clean slate: nothing announced yet.
   await data.updateSyndicate((s) => ({ ...s, version: { lastAnnounced: null, history: [] } }));
 
   // announceIfUpdated reads the channel/guild IDs from config, so point them at the
@@ -822,10 +822,21 @@ if (fs.existsSync(LIVE_STORE)) {
   t('⭐ the @everyone ping is in content (not the embed, where it would never notify)',
     client.sent[0]?.content === '@everyone');
   t('allowedMentions lets the ping through', client.sent[0]?.allowedMentions?.parse?.includes('everyone') === true);
+  // Derived at runtime on purpose: these assertions used to hard-code "v2.1.0"
+  // and "Music", so every version bump broke the suite. The contract is: the embed
+  // names WHICHEVER version package.json declares, and quotes WHICHEVER bullets
+  // head the changelog today.
+  const runningVersion = cfg.version;
+  const latest = verLib.parseChangelog()[0];
+  const firstDesc = client.sent[0]?.embeds?.[0]?.data?.description || '';
   t('the message carries an embed with the running version',
-    /v2\.1\.0/.test(client.sent[0]?.embeds?.[0]?.data?.description || ''));
-  t('the changelog for that version is quoted',
-    /Music/.test(client.sent[0]?.embeds?.[0]?.data?.description || ''));
+    firstDesc.includes(`v${runningVersion}`));
+  t('the changelog for that version is quoted', (() => {
+    if (!latest || latest.version !== runningVersion || !latest.items.length) return true;
+    const raw = latest.items[0];
+    return firstDesc.includes(raw.slice(0, 30))
+      || firstDesc.includes(raw.replace(/[*`]/g, '').slice(0, 30));
+  })(), latest && `${latest.version}: ${(latest.items[0] || '').slice(0, 40)}`);
   t('the embed has a title, fields and a timestamp', (() => {
     const e = client.sent[0]?.embeds?.[0]?.data;
     return !!e?.title && e.fields.length >= 3 && !!e.timestamp;
@@ -833,7 +844,7 @@ if (fs.existsSync(LIVE_STORE)) {
   t('the embed stays inside Discord’s 4096-char description limit',
     (client.sent[0]?.embeds?.[0]?.data?.description || '').length <= 4096);
 
-  t('the announced version was persisted', (await verLib.readState()).lastAnnounced === '2.1.0');
+  t('the announced version was persisted', (await verLib.readState()).lastAnnounced === runningVersion);
 
   // ⭐ The whole point of the design: a restart on the same version is silent.
   client = mockClient();
@@ -841,13 +852,17 @@ if (fs.existsSync(LIVE_STORE)) {
   t('⭐ restarting on the SAME version sends nothing', outcome.should === false && client.sent.length === 0, outcome.reason);
 
   // A new version announces again, and names the previous one.
-  await data.updateSyndicate((s) => ({ ...s, version: { lastAnnounced: '2.1.0', history: [{ version: '2.1.0', at: Date.now() - 86400000 }] } }));
+  await data.updateSyndicate((s) => ({ ...s, version: { lastAnnounced: runningVersion, history: [{ version: runningVersion, at: Date.now() - 86400000 }] } }));
   const origVersion = cfg.version;
-  Object.defineProperty(cfg, 'version', { value: '2.2.0', configurable: true });
+  // Derived, not hard-coded: the bump target must differ from WHATEVER version
+  // package.json declares today, or the "bump" is no bump at all.
+  const [maj, min] = origVersion.split('.').map(Number);
+  const bumpVersion = `${maj}.${min + 1}.0`;
+  Object.defineProperty(cfg, 'version', { value: bumpVersion, configurable: true });
   client = mockClient();
   outcome = await verLib.announceIfUpdated(client);
   t('a version bump announces as an update', outcome.should === true && outcome.kind === 'update', outcome.reason);
-  t('the message names the previous version', /was v2\.1\.0/.test(client.sent[0]?.embeds?.[0]?.data?.description || ''));
+  t('the message names the previous version', (client.sent[0]?.embeds?.[0]?.data?.description || '').includes(`was v${runningVersion}`));
   Object.defineProperty(cfg, 'version', { value: origVersion, configurable: true });
 
   // Without Mention Everyone the ping is dropped but the message still posts.

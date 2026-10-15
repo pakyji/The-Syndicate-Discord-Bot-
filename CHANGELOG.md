@@ -12,6 +12,28 @@ boot and announces only when they differ — an ordinary restart stays silent.
 
 ---
 
+## [2.2.0] - 2026-10-15
+
+### Removed
+- **Automatic coin drops.** The ready handler no longer launches a claim-embed
+  ("🪙 Coin Drop") in the drop channel every 30 minutes, and `AUTO_DROP_CHANNEL_ID`
+  is gone from the config and `.env.example`. The economy itself is untouched —
+  balances, shops, giveaways and `/coinflip` all work exactly as before; only the
+  scheduled free-coin drops are gone.
+
+## [2.1.1] - 2026-10-15
+
+### Fixed
+- **Crash loop: `client.user.setPresence(...).catch is not a function`.** In discord.js v14
+  the presence setters are synchronous — they return a `Presence`, not a Promise — so the
+  `.catch()` on the status-rotation timer threw a `TypeError` on every tick. An uncaught
+  exception inside a timer callback kills the process, so hosts restart-looped the bot and
+  every restart dropped live voice connections (music "never played"). Presence is now
+  applied through a guarded synchronous helper that cannot take the bot down.
+- `scripts/validate.js` now rejects `.then()`/`.catch()` chained onto
+  `setPresence()`/`setActivity()`/`setStatus()` anywhere in the tree, so this bug class
+  cannot ship again silently.
+
 ## [2.1.0]
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "the-syndicate",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "The Syndicate \u2014 a Discord community bot with economy, moderation, verification, giveaways, native polls and YouTube music. Every ID is configurable via .env; all writes are atomic; permission gates are enforced at registration AND at dispatch.",
   "main": "index.js",
   "scripts": {
