@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const perms = require('../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -8,10 +9,28 @@ module.exports = {
             option.setName('userid')
                 .setDescription('The ID of the user you want to unban')
                 .setRequired(true))
-        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+        .setDMPermission(false),
+    category: 'Moderation',
+
 
     async execute(interaction) {
-        const userId = interaction.options.getString('userid');
+
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.BanMembers))) return;
+        const userId = interaction.options.getString('userid').trim();
+
+        // A Discord snowflake is 17-20 digits. Anything else can never unban.
+        const isSnowflake = /^\d{17,20}$/.test(userId);
+        if (!isSnowflake) {
+            return await interaction.reply({
+                content: `❌ \`${userId.slice(0, 40)}\` is not a valid User ID. IDs are 17-20 digits — enable Developer Mode and use "Copy User ID".`,
+                ephemeral: true,
+            });
+        }
+
+        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.BanMembers)) {
+            return await interaction.reply({ content: '❌ I am missing the **Ban Members** permission.', ephemeral: true });
+        }
 
         try {
             // Esegue l'unban dell'utente tramite il suo ID

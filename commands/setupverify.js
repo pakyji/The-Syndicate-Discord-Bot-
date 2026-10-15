@@ -1,62 +1,61 @@
-const { PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+/**
+ * /setupverify — post the platform verification panel.
+ * Converted from the legacy `{name, execute}` format (registered with zero
+ * options) to a proper slash command with a target-channel option.
+ */
+const {
+    SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder,
+    ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType,
+} = require('discord.js');
+const perms = require('../lib/perms');
+
+function buildPanel() {
+    const embed = new EmbedBuilder()
+        .setColor('#2b2d31')
+        .setTitle('The Syndicate')
+        .setDescription('Welcome! Click your gaming platform below to unlock the server.')
+        .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('verify_ps4').setLabel('PS4').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
+        new ButtonBuilder().setCustomId('verify_ps5').setLabel('PS5').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
+        new ButtonBuilder().setCustomId('verify_pc').setLabel('PC').setStyle(ButtonStyle.Success).setEmoji('💻'),
+        new ButtonBuilder().setCustomId('verify_xbox').setLabel('Xbox').setStyle(ButtonStyle.Primary).setEmoji('🟢'),
+        new ButtonBuilder().setCustomId('verify_nongamer').setLabel('Non-Gamer').setStyle(ButtonStyle.Secondary).setEmoji('👤'),
+    );
+
+    return { embeds: [embed], components: [row] };
+}
 
 module.exports = {
-    name: 'setupverify',
-    category: 'Moderation',
-    description: 'Send the verification panel with platform buttons',
-    async execute(ctx) {
-        const isSlash = ctx.isChatInputCommand && ctx.isChatInputCommand();
+    data: new SlashCommandBuilder()
+        .setName('setupverify')
+        .setDescription('Send the verification panel with platform buttons')
+        .addChannelOption((option) => option
+            .setName('channel')
+            .setDescription('Where to post the panel (defaults to this channel)')
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+        .setDMPermission(false),
 
-        // Check if user has management permissions
-        const member = ctx.member || await ctx.guild.members.fetch(ctx.user.id).catch(() => null);
-        if (!member || !member.permissions.has(PermissionFlagsBits.ManageGuild)) {
-            const errReply = 'You do not have permission to use this command.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+    category: 'Moderation',
+
+    async execute(interaction) {
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ManageGuild))) return;
+
+        const target = interaction.options.getChannel('channel') || interaction.channel;
+
+        if (!target.permissionsFor(interaction.guild.members.me).has(PermissionFlagsBits.SendMessages)) {
+            return interaction.reply({ content: `❌ I cannot send messages in ${target}.`, ephemeral: true });
         }
 
-        const embed = new EmbedBuilder()
-            .setColor('#2b2d31')
-            .setTitle('The Syndicate')
-            .setDescription('Welcome! Click your gaming platform below to unlock the server.');
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('verify_ps4')
-                .setLabel('PS4')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('🎮'),
-            new ButtonBuilder()
-                .setCustomId('verify_ps5')
-                .setLabel('PS5')
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji('🎮'),
-            new ButtonBuilder()
-                .setCustomId('verify_pc')
-                .setLabel('PC')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('💻'),
-            new ButtonBuilder()
-                .setCustomId('verify_nongamer')
-                .setLabel('Non-Gamer')
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji('👤')
-        );
-
         try {
-            await ctx.channel.send({ embeds: [embed], components: [row] });
-            if (isSlash) {
-                await ctx.reply({ content: 'Verification panel sent successfully!', ephemeral: true });
-            } else {
-                await ctx.message.delete().catch(() => {});
-            }
+            await target.send(buildPanel());
+            return interaction.reply({ content: `✅ Verification panel posted in ${target}.`, ephemeral: true });
         } catch (error) {
-            console.error('Setupverify error:', error);
-            const errReply = 'Failed to send the verification panel.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+            console.error('[setupverify] failed:', error.message);
+            return interaction.reply({ content: '❌ Failed to send the verification panel.', ephemeral: true });
         }
     },
 };

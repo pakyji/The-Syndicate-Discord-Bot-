@@ -1,21 +1,18 @@
-const { Events, EmbedBuilder, Collection } = require('discord.js');
-
-// Server ke invite codes store karne ke liye map
-const invitesCache = new Collection();
+/**
+ * Invite tracker bootstrap.
+ *
+ * Now delegates to lib/invites.js, the single shared cache. The original kept
+ * its own module-level Collection that no other file could see.
+ */
+const { Events } = require('discord.js');
+const invites = require('../lib/invites');
 
 module.exports = {
     name: Events.ClientReady,
     once: true,
+
     async execute(client) {
-        // Bot start hote hi saare guilds ke invites fetch karke cache mein save kar lo
-        for (const [guildId, guild] of client.guilds.cache) {
-            try {
-                const firstInvites = await guild.invites.fetch();
-                invitesCache.set(guildId, new Map(firstInvites.map((invite) => [invite.code, invite.uses])));
-            } catch (err) {
-                console.error(`Could not fetch invites for guild ${guildId}:`, err);
-            }
-        }
+        await invites.warmAll(client);
         console.log('✅ Invite Tracker is active!');
     },
 };

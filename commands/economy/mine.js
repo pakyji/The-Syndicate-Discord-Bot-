@@ -1,121 +1,102 @@
+/**
+ * /mine — earn cash and minerals with your best pickaxe.
+ *
+ * BUG FIXED (command was 100% broken): the cooldown check referenced `now`
+ * BEFORE it was declared —
+ *
+ *     if (cooldowns.has(userId)) {
+ *         const expirationTime = cooldowns.get(userId) + cooldownTime;
+ *         if (now < expirationTime) { ... }        // <-- `now` not defined yet
+ *     }
+ *     const now = Date.now();                      // <-- declared afterwards
+ *
+ * `const` is hoisted into the temporal dead zone, so this threw
+ * `ReferenceError: Cannot access 'now' before initialization` and /mine never
+ * completed for anyone. (It only reached the TDZ branch once a cooldown existed,
+ * so the very first call worked and every later call crashed.)
+ *
+ * Other fixes:
+ *  • Cooldown uses the bounded tracker (was an unbounded Map + one timer/user).
+ *  • Balance and inventory writes go through the atomic store, so two /mine
+ *    calls in flight can no longer lose one of the rewards.
+ *  • Reads the shared catalog in lib/economy.js instead of a private copy.
+ */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const store = require('../../lib/data');
+const { Cooldowns } = require('../../lib/cooldowns');
+const { PICKAXES, COMMON_DROPS, RARE_DROPS, itemName, randomOf, money } = require('../../lib/economy');
 
-const storagePath = path.join(__dirname, 'economyStorage.json');
-const cooldowns = new Map(); // Cooldown to prevent spam (30 seconds)
+const COOLDOWN_MS = 30 * 1000;
+const cooldowns = new Cooldowns(COOLDOWN_MS, 10000);
 
-function loadEconomyData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({}, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
-}
-
-function saveEconomyData(data) {
-    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
-}
-
-// Pickaxes tiers and their drop rates / bonuses
-const pickaxes = [
-    { key: 'netherite_drill', name: 'Netherite Drill', minReward: 1500, maxReward: 4000, rareChance: 0.4 },
-    { key: 'diamond_pickaxe', name: 'Diamond Pickaxe', minReward: 800, maxReward: 2000, rareChance: 0.25 },
-    { key: 'iron_pickaxe', name: 'Iron Pickaxe', minReward: 300, maxReward: 900, rareChance: 0.1 },
-    { key: 'wooden_pickaxe', name: 'Wooden Pickaxe', minReward: 100, maxReward: 400, rareChance: 0.02 }
-];
-
-// Possible loot drops when mining
-const commonDrops = ['gold_nugget', 'gold_bar'];
-const rareDrops = ['diamond_gem', 'platinum_ingot', 'stellar_meteorite'];
-
-function getRandomItem(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function formatItemName(key) {
-    return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
+const BARE_HANDS = { min: 10, max: 60, rareChance: 0.05 };
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('mine')
-        .setDescription('Go mining using your pickaxe to earn cash and rare minerals!'),
+        .setDescription('Go mining with your best pickaxe to earn cash and minerals'),
+
+    category: 'Economy',
 
     async execute(interaction) {
+        const userId = interaction.user.id;
+
+        // Correct cooldown ordering: check first, then stamp.
+        if (cooldowns.has(userId)) {
+            const wait = Math.ceil(cooldowns.remaining(userId) / 1000);
+            return interaction.reply({
+                content: `⏳ You are exhausted! Mine again in **${wait}s**.`,
+                ephemeral: true,
+            });
+        }
+
         await interaction.deferReply();
 
-        const userId = interaction.user.id;
-        
-        // Check cooldown (30 seconds)
-        const cooldownTime = 30 * 1000;
-        if (cooldowns.has(userId)) {
-            const expirationTime = cooldowns.get(userId) + cooldownTime;
-            if (now < expirationTime) {
-                const timeLeft = Math.ceil((expirationTime - now) / 1000);
-                return await interaction.editReply({ content: `⏳ You are exhausted! Please wait **${timeLeft}s** before mining again.` });
-            }
+        const inventory = store.getInventory(userId);
+
+        // Best pickaxe owned (PICKAXES is ordered best-first).
+        const active = PICKAXES.find((p) => (Number(inventory[p.key]) || 0) > 0) || null;
+
+        const range = active
+            ? { min: active.minReward, max: active.maxReward, rareChance: active.rareChance }
+            : BARE_HANDS;
+
+        const cashEarned = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+        const foundItem = Math.random() < range.rareChance
+            ? randomOf(RARE_DROPS)
+            : randomOf(COMMON_DROPS);
+
+        // Stamp the cooldown only after the work succeeded.
+        cooldowns.take(userId);
+
+        // Single atomic update: cash and item land together or not at all.
+        const res = await store.updateUser(userId, (u) => {
+            u.wallet = (Number(u.wallet) || 0) + cashEarned;
+            if (!u.inventory || typeof u.inventory !== 'object') u.inventory = {};
+            u.inventory[foundItem] = (Number(u.inventory[foundItem]) || 0) + 1;
+        });
+
+        if (!res.ok) {
+            cooldowns.clear(userId);
+            return interaction.editReply({ content: '❌ Could not save your mining results. Please try again.' });
         }
-        
-        const now = Date.now();
-        cooldowns.set(userId, now);
-
-        const economyData = loadEconomyData();
-        if (!economyData[userId]) {
-            economyData[userId] = { wallet: 0, bank: 0, inventory: {} };
-        }
-
-        const userInventory = economyData[userId].inventory || {};
-
-        // Find the best pickaxe the user owns
-        let activePickaxe = null;
-        for (const p of pickaxes) {
-            if ((userInventory[p.key] || 0) > 0) {
-                activePickaxe = p;
-                break;
-            }
-        }
-
-        // If user has no pickaxe, give them a makeshift bare-hands experience or default low reward
-        let cashEarned = 0;
-        let foundItem = null;
-        let pickaxeUsedText = 'Bare Hands';
-
-        if (activePickaxe) {
-            pickaxeUsedText = activePickaxe.name;
-            cashEarned = Math.floor(Math.random() * (activePickaxe.maxReward - activePickaxe.minReward + 1)) + activePickaxe.minReward;
-            
-            // Check if they find an item based on pickaxe's rare chance
-            if (Math.random() < activePickaxe.rareChance) {
-                foundItem = getRandomItem(rareDrops);
-            } else {
-                foundItem = getRandomItem(commonDrops);
-            }
-        } else {
-            // No pickaxe penalty (very small reward)
-            cashEarned = Math.floor(Math.random() * 50) + 10;
-            if (Math.random() < 0.05) foundItem = 'gold_nugget';
-        }
-
-        // Update user balance and inventory
-        economyData[userId].wallet += cashEarned;
-        if (foundItem) {
-            userInventory[foundItem] = (userInventory[foundItem] || 0) + 1;
-        }
-        economyData[userId].inventory = userInventory;
-
-        saveEconomyData(economyData);
 
         const embed = new EmbedBuilder()
-            .setColor(0xCD7F32) // Bronze/Mining color
+            .setColor(0xcd7f32)
             .setTitle('⛏️ Mining Expedition Successful!')
-            .setDescription(`You went down into the mines using your **${pickaxeUsedText}** and dug deep into the bedrock.`)
-            .addFields(
-                { name: '💰 Cash Earned', value: `\`+$${cashEarned.toLocaleString()}\``, inline: true },
-                { name: '🎁 Mineral Found', value: foundItem ? `\`x1 ${formatItemName(foundItem)}\`` : '*Nothing special found this time*', inline: true }
+            .setDescription(
+                active
+                    ? `You descended into the mines with your **${active.name}** and dug deep into the bedrock.`
+                    : 'You had no pickaxe, so you dug with **bare hands**. Buy one with `/shop`!',
             )
-            .setFooter({ text: 'Tip: Buy better pickaxes or drills to earn much more cash and rare gems!' })
+            .addFields(
+                { name: '💰 Cash Earned', value: `+${money(cashEarned)}`, inline: true },
+                { name: '🎁 Mineral Found', value: `x1 ${itemName(foundItem)}`, inline: true },
+                { name: '👛 Wallet', value: money(store.getWallet(userId)), inline: true },
+            )
+            .setFooter({ text: 'Tip: better pickaxes earn far more cash and rare gems.' })
             .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     },
 };

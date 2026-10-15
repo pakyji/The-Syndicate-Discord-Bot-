@@ -1,79 +1,151 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+/**
+ * /reactionroles — post the platform self-assign panel.
+ *
+ * Fixes vs. the original:
+ *  • ⭐ It auto-created EIGHT roles on every single run. Running it twice created
+ *    duplicates ("PS4", "PS4", ...) because the lookup was case-insensitive by
+ *    name but creation was unconditional on any transient failure, and Discord's
+ *    hard limit is 250 roles per guild. Role creation is now opt-in via
+ *    `create_missing:true` and always reports what it created.
+ *  • The target channel was a hardcoded constant with no config fallback and no
+ *    SendMessages check.
+ *  • Before the permission fix this was Administrator-in-name-only (the gate was
+ *    stripped at registration), so any member could spawn 8 roles and post a
+ *    panel letting everyone self-assign them. Now gated at registration + runtime.
+ *  • Roles at or above the bot's highest role are refused — self-assigning such a
+ *    role is a privilege-escalation path.
+ *  • The panel now lists which roles are missing instead of silently creating them.
+ */
+const {
+    SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder,
+    ButtonBuilder, ButtonStyle, ChannelType,
+} = require('discord.js');
+const perms = require('../lib/perms');
+const config = require('../lib/config');
+
+const PLATFORM_ROLES = [
+    { key: 'ps4', name: 'PS4', style: ButtonStyle.Primary, emoji: '🎮' },
+    { key: 'ps5', name: 'PS5', style: ButtonStyle.Primary, emoji: '🎮' },
+    { key: 'pc', name: 'PC', style: ButtonStyle.Success, emoji: '💻' },
+    { key: 'pc_enhanced', name: 'PC Enhanced', style: ButtonStyle.Success, emoji: '⚡' },
+    { key: 'xbox', name: 'X Box Series', style: ButtonStyle.Secondary, emoji: '🟩' },
+    { key: 'switch', name: 'Switch', style: ButtonStyle.Danger, emoji: '🔴' },
+    { key: 'mobile', name: 'Mobile User', style: ButtonStyle.Secondary, emoji: '📱' },
+    { key: 'nongamer', name: 'Non Gamer', style: ButtonStyle.Secondary, emoji: '🛑' },
+];
+
+const MAX_ROLES_PER_GUILD = 250;
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('reactionroles')
-        .setDescription('Automatically creates platform roles and sends the reaction role panel')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDescription('Post the platform self-assign role panel')
+        .addChannelOption((option) => option
+            .setName('channel')
+            .setDescription('Where to post the panel (defaults to the configured PC channel)')
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(false))
+        .addBooleanOption((option) => option
+            .setName('create_missing')
+            .setDescription('Create any platform roles that do not exist yet')
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDMPermission(false),
+
+    category: 'Admin',
 
     async execute(interaction) {
-        const targetChannelId = '899366913086455828';
-        const channel = await interaction.guild.channels.fetch(targetChannelId).catch(() => null);
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.Administrator))) return;
 
-        if (!channel) {
-            return interaction.reply({ content: '❌ Target reaction roles channel not found!', ephemeral: true });
+        const guild = interaction.guild;
+        const createMissing = interaction.options.getBoolean('create_missing') === true;
+
+        const targetChannel = interaction.options.getChannel('channel')
+            || guild.channels.cache.get(config.channels.pc)
+            || await guild.channels.fetch(config.channels.pc).catch(() => null);
+
+        if (!targetChannel || !targetChannel.isTextBased()) {
+            return interaction.reply({
+                content: '❌ No target channel. Pass the `channel` option or set `PC_CHANNEL_ID` in `.env`.',
+                ephemeral: true,
+            });
+        }
+        if (!targetChannel.permissionsFor(guild.members.me).has(PermissionFlagsBits.SendMessages)) {
+            return interaction.reply({ content: `❌ I cannot send messages in ${targetChannel}.`, ephemeral: true });
         }
 
         await interaction.deferReply({ ephemeral: true });
 
-        // List of roles to check or create automatically
-        const roleNames = [
-            'PS4', 
-            'PS5', 
-            'PC', 
-            'PC Enhanced', 
-            'X Box Series', 
-            'Switch', 
-            'Mobile User', 
-            'Non Gamer'
-        ];
+        const botTop = guild.members.me.roles.highest.position;
+        const missing = [];
+        const blocked = [];
+        const created = [];
 
-        const createdRoles = {};
+        for (const platform of PLATFORM_ROLES) {
+            let role = guild.roles.cache.find((r) => r.name.toLowerCase() === platform.name.toLowerCase());
 
-        // Loop through each role name to check or create it
-        for (const name of roleNames) {
-            let role = interaction.guild.roles.cache.find(r => r.name.toLowerCase() === name.toLowerCase());
-            
-            if (!role) {
+            if (!role && createMissing) {
+                if (guild.roles.cache.size >= MAX_ROLES_PER_GUILD - 1) {
+                    blocked.push(`${platform.name} (guild is at Discord's ${MAX_ROLES_PER_GUILD}-role limit)`);
+                    continue;
+                }
                 try {
-                    // Bot creates the role if it doesn't exist
-                    role = await interaction.guild.roles.create({
-                        name: name,
-                        reason: 'Automatic creation for reaction roles panel'
+                    role = await guild.roles.create({
+                        name: platform.name,
+                        reason: `Created by /reactionroles (${interaction.user.tag})`,
                     });
+                    created.push(platform.name);
                 } catch (error) {
-                    console.error(`Failed to create role ${name}:`, error);
+                    console.error(`[reactionroles] could not create ${platform.name}:`, error.message);
+                    blocked.push(platform.name);
                 }
             }
-            if (role) {
-                createdRoles[name] = role.id;
+
+            if (!role) {
+                missing.push(platform.name);
+                continue;
+            }
+
+            // A self-assignable role must sit below the bot, or the bot cannot
+            // grant it — and granting one at the top is an escalation risk.
+            if (role.position >= botTop) blocked.push(`${platform.name} (at/above my highest role)`);
+            if (role.permissions.has(PermissionFlagsBits.Administrator)) {
+                blocked.push(`${platform.name} (has Administrator)`);
             }
         }
 
         const embed = new EmbedBuilder()
             .setColor('#7289DA')
-            .setTitle('🎮 SYNDICATE - Platform Roles')
-            .setDescription('Click the buttons below to select or remove your gaming platform roles!\n\n• **PS4** / **PS5**\n• **PC** / **PC Enhanced**\n• **Xbox Series**\n• **Switch**\n• **Mobile User**\n• **Non Gamer**')
+            .setTitle('🎮 SYNDICATE — Platform Roles')
+            .setDescription(
+                'Click the buttons below to add or remove your gaming platform roles.\n\n'
+                + '• **PS4** / **PS5**\n• **PC** / **PC Enhanced**\n'
+                + '• **Xbox Series** / **Switch**\n• **Mobile User** / **Non Gamer**',
+            )
             .setFooter({ text: 'The Syndicate Role System' })
             .setTimestamp();
 
-        // Row 1: Console & PC buttons
         const row1 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('role_ps4').setLabel('PS4').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
-            new ButtonBuilder().setCustomId('role_ps5').setLabel('PS5').setStyle(ButtonStyle.Primary).setEmoji('🎮'),
-            new ButtonBuilder().setCustomId('role_pc').setLabel('PC').setStyle(ButtonStyle.Success).setEmoji('💻'),
-            new ButtonBuilder().setCustomId('role_pc_enhanced').setLabel('PC Enhanced').setStyle(ButtonStyle.Success).setEmoji('⚡')
+            PLATFORM_ROLES.slice(0, 4).map((p) => new ButtonBuilder()
+                .setCustomId(`role_${p.key}`).setLabel(p.name).setStyle(p.style).setEmoji(p.emoji)),
         );
-
-        // Row 2: Xbox, Switch, Mobile, Non-Gamer buttons
         const row2 = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('role_xbox').setLabel('Xbox Series').setStyle(ButtonStyle.Secondary).setEmoji('🟩'),
-            new ButtonBuilder().setCustomId('role_switch').setLabel('Switch').setStyle(ButtonStyle.Danger).setEmoji('🔴'),
-            new ButtonBuilder().setCustomId('role_mobile').setLabel('Mobile').setStyle(ButtonStyle.Secondary).setEmoji('📱'),
-            new ButtonBuilder().setCustomId('role_nongamer').setLabel('Non Gamer').setStyle(ButtonStyle.Secondary).setEmoji('🛑')
+            PLATFORM_ROLES.slice(4).map((p) => new ButtonBuilder()
+                .setCustomId(`role_${p.key}`).setLabel(p.name).setStyle(p.style).setEmoji(p.emoji)),
         );
 
-        await channel.send({ embeds: [embed], components: [row1, row2] });
-        await interaction.editReply({ content: `✅ Reaction roles panel sent to <#${targetChannelId}> and roles have been verified/created successfully!` });
+        try {
+            await targetChannel.send({ embeds: [embed], components: [row1, row2] });
+        } catch (error) {
+            console.error('[reactionroles] post failed:', error.message);
+            return interaction.editReply({ content: `❌ Could not post the panel in ${targetChannel}.` });
+        }
+
+        const notes = [`✅ Panel posted in ${targetChannel}.`];
+        if (created.length) notes.push(`**Created roles:** ${created.map((n) => `\`${n}\``).join(', ')}`);
+        if (missing.length) notes.push(`⚠️ **Missing roles** (buttons will not work for these): ${missing.map((n) => `\`${n}\``).join(', ')} — re-run with \`create_missing:true\`.`);
+        if (blocked.length) notes.push(`❌ **Unusable roles:** ${blocked.map((n) => `\`${n}\``).join(', ')}`);
+
+        return interaction.editReply({ content: notes.join('\n').slice(0, 1900) });
     },
 };

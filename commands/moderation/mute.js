@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const perms = require('../../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -16,11 +17,17 @@ module.exports = {
             option.setName('reason')
                 .setDescription('Reason for the mute')
                 .setRequired(false))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+        .setDMPermission(false),
 
     category: 'Moderation',
 
     async execute(interaction) {
+
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ModerateMembers))) return;
+
+
+        // Role-hierarchy check: never let a mod act on an equal/higher-ranking member.
         try {
             const targetUser = interaction.options.getMember('target');
             const durationMinutes = interaction.options.getInteger('duration');
@@ -28,6 +35,13 @@ module.exports = {
 
             if (!targetUser) {
                 return interaction.reply({ content: '❌ User not found in this server!', ephemeral: true });
+            }
+
+            if (!perms.canModerate(interaction.member, targetUser)) {
+                return interaction.reply({
+                    content: '❌ You cannot moderate this member — they hold an equal or higher role than you.',
+                    ephemeral: true,
+                });
             }
 
             if (!targetUser.moderatable) {

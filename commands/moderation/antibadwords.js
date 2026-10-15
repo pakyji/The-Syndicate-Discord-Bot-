@@ -1,83 +1,133 @@
+/**
+ * /antibadwords — toggle the word filter and manage the list.
+ *
+ * Fixes vs. the original:
+ *  • PER-GUILD settings (was one global file shared by every server).
+ *  • Atomic writes via the store.
+ *  • Added `remove` and `list` — entries could previously never be removed.
+ *  • Runtime permission check.
+ *  • Entries are validated: no empty strings, no single characters (which would
+ *    censor almost every message), and a hard cap on list size.
+ *  • The placeholder words shipped in the repo ("badword1", "badword2") are
+ *    rejected so a fresh install does not censor nonsense.
+ */
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const store = require('../../lib/data');
+const perms = require('../../lib/perms');
 
-const storagePath = path.join(__dirname, 'securityStorage.json');
+const MAX_ENTRIES = 200;
+const MAX_WORD_LENGTH = 40;
 
-function loadData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({ antiLinkStatus: true, antiBadWordsStatus: true, customBlockedLinks: [], customBadWords: [] }, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
-}
-
-function saveData(data) {
-    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
+function normaliseWord(input) {
+    return String(input || '').trim().toLowerCase().slice(0, MAX_WORD_LENGTH);
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('antibadwords')
-        .setDescription('Manage bad words filter and custom blocked words.')
+        .setDescription('Manage the bad-words filter')
+        .addSubcommand((sub) => sub
+            .setName('toggle')
+            .setDescription('Turn the filter on or off')
+            .addStringOption((option) => option
+                .setName('status')
+                .setDescription('ON or OFF')
+                .setRequired(true)
+                .addChoices({ name: 'On', value: 'on' }, { name: 'Off', value: 'off' })))
+        .addSubcommand((sub) => sub
+            .setName('add')
+            .setDescription('Add a word to the filter')
+            .addStringOption((option) => option
+                .setName('word')
+                .setDescription('The word to block (min 2 characters)')
+                .setRequired(true)))
+        .addSubcommand((sub) => sub
+            .setName('remove')
+            .setDescription('Remove a word from the filter')
+            .addStringOption((option) => option
+                .setName('word')
+                .setDescription('The word to unblock')
+                .setRequired(true)))
+        .addSubcommand((sub) => sub
+            .setName('list')
+            .setDescription('Show the current filter list and status'))
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('toggle')
-                .setDescription('Turn bad words filter on or off.')
-                .addStringOption(option =>
-                    option.setName('status')
-                        .setDescription('Choose ON or OFF')
-                        .setRequired(true)
-                        .addChoices(
-                            { name: 'On', value: 'on' },
-                            { name: 'Off', value: 'off' }
-                        )))
-        .addSubcommand(subcommand =>
-            subcommand
-                .setName('add')
-                .setDescription('Add a custom bad word to the filter.')
-                .addStringOption(option =>
-                    option.setName('word')
-                        .setDescription('The word you want to block')
-                        .setRequired(true))),
+        .setDMPermission(false),
+
+    category: 'Moderation',
 
     async execute(interaction) {
-        // Prevent "The application did not respond" timeout error
-        await interaction.deferReply({ ephemeral: true });
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ManageGuild))) return;
 
-        const data = loadData();
-        const subcommand = interaction.options.getSubcommand();
+        const guildId = interaction.guild.id;
+        const sub = interaction.options.getSubcommand();
+        const settings = store.getGuild(guildId);
 
-        if (subcommand === 'toggle') {
-            const status = interaction.options.getString('status');
-            data.antiBadWordsStatus = (status === 'on');
-            saveData(data);
+        if (sub === 'toggle') {
+            const enabled = interaction.options.getString('status') === 'on';
+            await store.updateGuild(guildId, (g) => { g.antiBadWords = enabled; });
 
             const embed = new EmbedBuilder()
-                .setColor(data.antiBadWordsStatus ? 0x00FF00 : 0xFF0000)
-                .setTitle('🛡️ Bad Words Filter Status Updated')
-                .setDescription(`Bad words filter has been turned **${status.toUpperCase()}**.`)
+                .setColor(enabled ? 0x00ff00 : 0xff0000)
+                .setTitle('🛡️ Bad Words Filter Updated')
+                .setDescription(`The filter is now **${enabled ? 'ON' : 'OFF'}** in this server.`)
                 .setTimestamp();
 
-            await interaction.editReply({ embeds: [embed] });
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
 
-        } else if (subcommand === 'add') {
-            const word = interaction.options.getString('word').toLowerCase().trim();
+        if (sub === 'add') {
+            const word = normaliseWord(interaction.options.getString('word'));
 
-            if (data.customBadWords.includes(word)) {
-                return await interaction.editReply({ content: `⚠️ The word \`${word}\` is already in the filter list.` });
+            if (word.length < 2) {
+                return interaction.reply({
+                    content: '❌ Words must be at least 2 characters — a single letter would censor almost everything.',
+                    ephemeral: true,
+                });
+            }
+            if ((settings.badWords || []).length >= MAX_ENTRIES) {
+                return interaction.reply({ content: `❌ The filter list is full (${MAX_ENTRIES} entries).`, ephemeral: true });
+            }
+            if ((settings.badWords || []).includes(word)) {
+                return interaction.reply({ content: `⚠️ \`${word}\` is already filtered.`, ephemeral: true });
             }
 
-            data.customBadWords.push(word);
-            saveData(data);
+            await store.updateGuild(guildId, (g) => {
+                if (!Array.isArray(g.badWords)) g.badWords = [];
+                g.badWords.push(word);
+            });
 
-            const embed = new EmbedBuilder()
-                .setColor(0x00FF00)
-                .setTitle('🛡 Custom Bad Word Added')
-                .setDescription(`Successfully added \`${word}\` to your prohibited words list.`)
-                .setTimestamp();
-
-            await interaction.editReply({ embeds: [embed] });
+            return interaction.reply({ content: `✅ Added \`${word}\` to the filter.`, ephemeral: true });
         }
+
+        if (sub === 'remove') {
+            const word = normaliseWord(interaction.options.getString('word'));
+            const list = settings.badWords || [];
+            if (!list.includes(word)) {
+                return interaction.reply({ content: `⚠️ \`${word}\` is not in the filter list.`, ephemeral: true });
+            }
+
+            await store.updateGuild(guildId, (g) => {
+                g.badWords = (g.badWords || []).filter((w) => w !== word);
+            });
+
+            return interaction.reply({ content: `✅ Removed \`${word}\` from the filter.`, ephemeral: true });
+        }
+
+        // list
+        const current = store.getGuild(guildId);
+        const words = (current.badWords || []).filter((w) => w && !/^badword\d*$/i.test(w));
+
+        const embed = new EmbedBuilder()
+            .setColor(current.antiBadWords ? 0x00ff00 : 0xff0000)
+            .setTitle('🛡️ Bad Words Filter')
+            .setDescription(`Filtering: **${current.antiBadWords ? 'ON' : 'OFF'}**`)
+            .addFields({
+                name: `Filtered words (${words.length})`,
+                value: words.length ? words.map((w) => `\`${w}\``).join(', ').slice(0, 1024) : '*None*',
+            })
+            .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
     },
 };

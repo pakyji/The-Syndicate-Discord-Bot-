@@ -1,6 +1,0 @@
-{
-    "antiLinkStatus": true,
-    "antiBadWordsStatus": true,
-    "customBlockedLinks": ["discord.gg", "t.me"],
-    "customBadWords": ["badword1", "badword2"]
-}

@@ -1,88 +1,138 @@
+/**
+ * Periodic "come say hi" ping to a few verified members.
+ *
+ * Fixes vs. the original:
+ *  • Removed `await guild.members.fetch()` — a full member-list pull every 30
+ *    minutes is expensive, rate-limited, and unnecessary because
+ *    `role.members` is already populated for a cached guild.
+ *  • The random-pick `while` loop could spin for a long time when the verified
+ *    pool was small (it retried until it found 3 *distinct* IDs). Now uses a
+ *    Fisher-Yates partial shuffle — O(n), always terminates.
+ *  • Timezone came from `Europe/Paris` while the greeting cron used
+ *    `Europe/Rome`. Both now read BOT_TIMEZONE.
+ *  • Guild resolved by GUILD_ID instead of `guilds.cache.first()`.
+ *  • Channel/role IDs from config; role matched by ID when configured.
+ *  • Interval is tracked and cleared on shutdown.
+ *  • Skips members who are offline or have recently been pinged, so the same
+ *    person is not called out repeatedly.
+ */
 const { Events } = require('discord.js');
+const config = require('../lib/config');
+const roles = require('../lib/roles');
+
+const FUNNY_MESSAGES = [
+    'Hey {USERS}, what are you all sneaking around here for? Come say hi!',
+    'Looks like {USERS} are gaming way too hard today. Someone check on them!',
+    'Yo {USERS}! Drink some water, take a break, and step away from the screen!',
+    'Where are you guys, {USERS}? Everyone in the server misses you (or maybe your snacks)!',
+    'Anyone up for a session, {USERS}? The crew is waiting!',
+    'Bro {USERS}, are you all still alive or did you fall asleep on your keyboards?',
+];
+
+const PING_COUNT = 3;
+/** Do not ping the same member again within this window. */
+const PER_MEMBER_COOLDOWN_MS = 12 * 60 * 60 * 1000;
+
+/** Pick up to `count` distinct items without a retry loop. */
+function sample(list, count) {
+    const pool = [...list];
+    const out = [];
+    while (pool.length && out.length < count) {
+        const i = Math.floor(Math.random() * pool.length);
+        out.push(pool.splice(i, 1)[0]);
+    }
+    return out;
+}
 
 module.exports = {
     name: Events.ClientReady,
     once: true,
+
     execute(client) {
-        const TARGET_CHANNEL_ID = '1552721386244407357'; // Your target channel ID
-        const VERIFIED_ROLE_NAME = 'Verified';
-        
-        // List of funny messages
-        const funnyMessages = [
-            "Hey {USERS}, what are you all sneaking around here for? Come say hi!",
-            "Looks like {USERS} are gaming way too hard today. Someone check on them!",
-            "Yo {USERS}! Drink some water, take a break, and step away from the screen!",
-            "Where are you guys, {USERS}? Everyone in the server misses you (or maybe your snacks)!",
-            "Alert! {USERS} have been AFK for more than 5 minutes without permission!",
-            "Bro {USERS}, are you all still alive or did you fall asleep on your keyboards?"
-        ];
+        if (!config.verifiedPing.enabled) {
+            console.log('[verifiedPing] disabled via VERIFIED_PING_ENABLED=false');
+            return;
+        }
+        if (!config.channels.verifiedPing) {
+            console.log('[verifiedPing] VERIFIED_PING_CHANNEL_ID not set — task disabled.');
+            return;
+        }
 
-        // Check every 30 minutes to see if it's time to send a ping based on the active window
-        const checkInterval = 30 * 60 * 1000; // 30 minutes
+        const lastPinged = new Map(); // userId -> timestamp
         let lastPingTime = 0;
-        const PING_COOLDOWN = 3 * 60 * 60 * 1000; // 3 hours gap between each ping
 
-        setInterval(async () => {
+        function inActiveWindow() {
+            const parts = new Intl.DateTimeFormat('en-GB', {
+                timeZone: config.verifiedPing.timezone,
+                hour: 'numeric',
+                minute: 'numeric',
+                hour12: false,
+            }).formatToParts(new Date());
+
+            const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+            return hour >= config.verifiedPing.activeFromHour && hour < config.verifiedPing.activeToHour;
+        }
+
+        const timer = setInterval(async () => {
             try {
-                // Get current time in Europe timezone (e.g., Central European Time / CET / CEST)
-                const now = new Date();
-                const europeTimeOptions = { timeZone: 'Europe/Paris', hour: 'numeric', minute: 'numeric', hour12: false };
-                const formatter = new Intl.DateTimeFormat([], europeTimeOptions);
-                const timeString = formatter.format(now); // e.g., "06:30" or "22:15"
-                
-                const [currentHour, currentMinute] = timeString.split(':').map(Number);
+                if (!inActiveWindow()) return;
 
-                // Check if current Europe time is between 06:00 (6 AM) and 23:00 (11 PM)
-                const isInActiveWindow = (currentHour > 6 || (currentHour === 6 && currentMinute >= 0)) && 
-                                           (currentHour < 23 || (currentHour === 23 && currentMinute === 0));
+                const now = Date.now();
+                if (lastPingTime && now - lastPingTime < config.verifiedPing.cooldownMs) return;
 
-                if (!isInActiveWindow) {
-                    return; // Skip if outside 06:00 - 23:00 Europe time
-                }
-
-                // Check if 3 hours have passed since the last ping
-                const currentTime = Date.now();
-                if (currentTime - lastPingTime < PING_COOLDOWN && lastPingTime !== 0) {
-                    return; 
-                }
-
-                const guild = client.guilds.cache.first();
+                const guild = config.guildId
+                    ? client.guilds.cache.get(config.guildId)
+                    : client.guilds.cache.first();
                 if (!guild) return;
 
-                const channel = await guild.channels.fetch(TARGET_CHANNEL_ID).catch(() => null);
-                if (!channel) return;
+                const channel = guild.channels.cache.get(config.channels.verifiedPing)
+                    || await guild.channels.fetch(config.channels.verifiedPing).catch(() => null);
+                if (!channel || !channel.isTextBased()) return;
 
-                // Fetch members to ensure role cache is up to date
-                await guild.members.fetch();
-                
-                const verifiedRole = guild.roles.cache.find(r => r.name === VERIFIED_ROLE_NAME);
+                const verifiedRole = await roles.getVerifiedRole(guild);
                 if (!verifiedRole) return;
 
-                const verifiedMembers = verifiedRole.members.map(m => m.user.id);
-                if (verifiedMembers.length === 0) return;
+                // Use the cached member list — no full guild.members.fetch().
+                const eligible = verifiedRole.members
+                    .filter((m) => !m.user.bot)
+                    .filter((m) => m.presence?.status !== 'offline')
+                    .filter((m) => {
+                        const at = lastPinged.get(m.id) || 0;
+                        return now - at >= PER_MEMBER_COOLDOWN_MS;
+                    })
+                    .map((m) => m.id);
 
-                // Pick up to 3 random verified members
-                const countToPing = Math.min(3, verifiedMembers.length);
-                const selectedUserIds = [];
+                if (!eligible.length) return;
 
-                while (selectedUserIds.length < countToPing) {
-                    const randomId = verifiedMembers[Math.floor(Math.random() * verifiedMembers.length)];
-                    if (!selectedUserIds.includes(randomId)) {
-                        selectedUserIds.push(randomId);
+                const picked = sample(eligible, Math.min(PING_COUNT, config.verifiedPing.maxPings));
+                if (!picked.length) return;
+
+                const mentions = picked.map((id) => `<@${id}>`).join(', ');
+                const template = FUNNY_MESSAGES[Math.floor(Math.random() * FUNNY_MESSAGES.length)];
+
+                await channel.send({
+                    content: template.replace('{USERS}', mentions),
+                    allowedMentions: { users: picked, parse: [] }, // mention ONLY the picked users
+                });
+
+                for (const id of picked) lastPinged.set(id, now);
+                lastPingTime = now;
+
+                // Keep the cooldown map bounded.
+                if (lastPinged.size > 5000) {
+                    for (const [id, at] of lastPinged) {
+                        if (now - at >= PER_MEMBER_COOLDOWN_MS) lastPinged.delete(id);
                     }
                 }
-
-                const userMentions = selectedUserIds.map(id => `<@${id}>`).join(', ');
-                const randomMsgTemplate = funnyMessages[Math.floor(Math.random() * funnyMessages.length)];
-                const finalMessage = randomMsgTemplate.replace('{USERS}', userMentions);
-
-                // Send message and update last ping timestamp
-                await channel.send(finalMessage);
-                lastPingTime = Date.now();
-
             } catch (error) {
-                console.error('Error in verified ping active-window task:', error);
+                console.error('[verifiedPing] task failed:', error.message);
             }
-        }, checkInterval);
+        }, config.verifiedPing.intervalMs);
+
+        timer.unref?.();
+        client.verifiedPingTimer = timer;
+        client.once('shardDisconnect', () => clearInterval(timer));
+        process.on('SIGTERM', () => clearInterval(timer));
+        process.on('SIGINT', () => clearInterval(timer));
     },
 };

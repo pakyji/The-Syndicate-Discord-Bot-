@@ -1,94 +1,123 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+/**
+ * /warn — issue a persistent warning to a member.
+ *
+ * The original file was NOT a warn command at all: it was a copy-paste of
+ * antispam.js that built its own `new Client()` and called
+ * `client.login(process.env.DISCORD_TOKEN)` at module scope. Because index.js
+ * require()s every file under commands/, that opened a SECOND gateway session
+ * on the same token — Discord invalidates the older session, producing an
+ * endless disconnect/reconnect loop. It also had no module.exports, so the
+ * loader skipped it and /warn never existed.
+ *
+ * This is a real warn command, gated behind ModerateMembers, with warnings
+ * persisted to disk (the original kept them in a memory Map that reset on
+ * every restart).
+ */
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const data = require('../../lib/data');
+const perms = require('../../lib/perms');
+const config = require('../../lib/config');
 
-// Initialize an independent client for anti-spam monitoring
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildModeration
-    ]
-});
+/** Auto-escalation thresholds. */
+const ESCALATION = [
+    { at: 3, action: 'timeout', minutes: 10 },
+    { at: 5, action: 'timeout', minutes: 60 },
+    { at: 8, action: 'kick' },
+];
 
-// Track message history and content for spam detection: Map<userId, { timestamps: [], lastContent: string, duplicateCount: number }>
-const userActivity = new Map();
+module.exports = {
+    data: new SlashCommandBuilder()
+        .setName('warn')
+        .setDescription('Warn a member (warnings are saved permanently)')
+        .addUserOption((option) => option
+            .setName('target')
+            .setDescription('The member to warn')
+            .setRequired(true))
+        .addStringOption((option) => option
+            .setName('reason')
+            .setDescription('Reason for the warning')
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+        .setDMPermission(false),
 
-// Configuration limits
-const SPAM_LIMIT = 4;     // Max messages allowed...
-const TIME_WINDOW = 6000; // ...within 6 seconds
+    category: 'Moderation',
 
-client.once('ready', () => {
-    console.log(`[Anti-Spam & Anti-Flood Monitor] Running independently as ${client.user.tag}`);
-});
+    async execute(interaction) {
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ModerateMembers))) return;
 
-client.on('messageCreate', async (message) => {
-    // Ignore bots, system messages, or DMs
-    if (message.author.bot || !message.guild) return;
+        const targetUser = interaction.options.getUser('target');
+        const reason = (interaction.options.getString('reason') || 'No reason provided').slice(0, 500);
 
-    // Allow admins/moderators to bypass anti-spam
-    if (message.member && message.member.permissions.has('ManageMessages')) return;
-
-    const userId = message.author.id;
-    const now = Date.now();
-    const content = message.content.trim();
-    const hasAttachment = message.attachments.size > 0;
-
-    if (!userActivity.has(userId)) {
-        userActivity.set(userId, { timestamps: [], lastContent: '', duplicateCount: 0 });
-    }
-
-    const userData = userActivity.get(userId);
-    
-    // 1. Filter out timestamps older than the time window
-    userData.timestamps = userData.timestamps.filter(timestamp => now - timestamp < TIME_WINDOW);
-    userData.timestamps.push(now);
-
-    // 2. Check for Duplicate Content Spam (Skip if the message contains an image/attachment)
-    if (!hasAttachment) {
-        if (content.length > 0 && userData.lastContent === content) {
-            userData.duplicateCount += 1;
-        } else {
-            userData.lastContent = content;
-            userData.duplicateCount = 1;
+        if (targetUser.id === interaction.user.id) {
+            return interaction.reply({ content: '❌ You cannot warn yourself.', ephemeral: true });
         }
-    }
+        if (targetUser.bot) {
+            return interaction.reply({ content: '❌ Bots cannot be warned.', ephemeral: true });
+        }
 
-    // Determine if spam criteria is met (either too fast or repeating same text 3+ times)
-    const isFastSpam = userData.timestamps.length > SPAM_LIMIT;
-    const isDuplicateSpam = !hasAttachment && userData.duplicateCount >= 3;
+        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+        if (!member) {
+            return interaction.reply({ content: '❌ That user is not in this server.', ephemeral: true });
+        }
+        if (!perms.canModerate(interaction.member, member)) {
+            return interaction.reply({
+                content: '❌ You cannot warn this member — they hold an equal or higher role than you.',
+                ephemeral: true,
+            });
+        }
 
-    if (isFastSpam || isDuplicateSpam) {
-        try {
-            // Delete the excessive spam message
-            await message.delete().catch(() => {});
+        await interaction.deferReply();
 
-            // Send a temporary warning message in the server chat
-            const warning = await message.channel.send(`⚠️ **${message.author.username}**, please stop spamming or flooding the chat!`);
-            setTimeout(() => warning.delete().catch(() => {}), 4000);
+        const total = await data.addWarning(targetUser.id, {
+            reason,
+            moderatorId: interaction.user.id,
+            guildId: interaction.guild.id,
+        });
 
-            // Send a Direct Message (DM) to the member
-            const dmEmbed = new EmbedBuilder()
-                .setColor(0xFF0000)
-                .setTitle('⚠️ Anti-Spam / Flood Warning')
-                .setDescription(`You have been temporarily **timed out for 60 seconds** in **${message.guild.name}** for sending repetitive messages or flooding the chat.\n\n` +
-                    `*Please follow the server rules.*`)
-                .setTimestamp();
+        // Tell the member (best effort — DMs may be closed).
+        const dmEmbed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle(`⚠️ Warning in ${interaction.guild.name}`)
+            .setDescription(`**Reason:** ${reason}\n**Total warnings:** ${total}`)
+            .setTimestamp();
+        await targetUser.send({ embeds: [dmEmbed] }).catch(() => {});
 
-            await message.author.send({ embeds: [dmEmbed] }).catch(() => {});
-
-            // Timeout the user for 60 seconds
-            if (message.member && message.member.moderatable) {
-                await message.member.timeout(60 * 1000, 'Automated Anti-Spam: Repetitive flood/spam').catch(() => {});
+        // Escalate automatically at configured thresholds.
+        let escalationNote = '';
+        const rule = ESCALATION.find((e) => e.at === total);
+        if (rule && member.moderatable) {
+            const auditReason = `Auto-escalation after ${total} warnings: ${reason}`;
+            try {
+                if (rule.action === 'timeout') {
+                    await member.timeout(rule.minutes * 60 * 1000, auditReason);
+                    escalationNote = `\n⏱️ Auto-timed out for **${rule.minutes} minute(s)** (warning #${total}).`;
+                } else if (rule.action === 'kick') {
+                    await member.kick(auditReason);
+                    escalationNote = `\n👢 Auto-kicked (warning #${total}).`;
+                }
+            } catch (error) {
+                console.error('[warn] escalation failed:', error.message);
+                escalationNote = '\n⚠️ Automatic escalation failed (check my role position).';
             }
-
-            // Reset user activity data to prevent infinite loops
-            userActivity.set(userId, { timestamps: [], lastContent: '', duplicateCount: 0 });
-
-        } catch (error) {
-            console.error('[Anti-Spam Error]:', error);
         }
-    }
-});
 
-// Automatically reads the token from your panel environment variables
-client.login(process.env.DISCORD_TOKEN);
+        const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle('⚠️ Member Warned')
+            .addFields(
+                { name: 'Member', value: `${targetUser} (\`${targetUser.id}\`)`, inline: true },
+                { name: 'Moderator', value: `${interaction.user}`, inline: true },
+                { name: 'Total warnings', value: `${total}`, inline: true },
+                { name: 'Reason', value: reason },
+            )
+            .setTimestamp();
+
+        await interaction.editReply({ content: escalationNote || undefined, embeds: [embed] });
+
+        // Mirror to the staff log channel if one is configured.
+        const logChannel = interaction.guild.channels.cache.get(config.channels.errorLog);
+        if (logChannel && logChannel.isTextBased()) {
+            await logChannel.send({ embeds: [embed] }).catch(() => {});
+        }
+    },
+};

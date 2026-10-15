@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const perms = require('../../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -12,9 +13,14 @@ module.exports = {
             option.setName('reason')
                 .setDescription('Reason for the ban')
                 .setRequired(false))
-        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers),
+        .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+        .setDMPermission(false),
+    category: 'Moderation',
+
 
     async execute(interaction) {
+
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.BanMembers))) return;
         const targetUser = interaction.options.getUser('target');
         const reason = interaction.options.getString('reason') || 'No reason provided';
         const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
@@ -24,7 +30,15 @@ module.exports = {
             return await interaction.reply({ content: '❌ That user is not in this server or could not be found.', ephemeral: true });
         }
 
-        // Check if bot can ban the user (role hierarchy check)
+        // Role-hierarchy check: a mod must not be able to ban an equal/higher rank.
+        if (!perms.canModerate(interaction.member, member)) {
+            return await interaction.reply({
+                content: '❌ You cannot ban this member — they hold an equal or higher role than you.',
+                ephemeral: true,
+            });
+        }
+
+        // Check if the BOT can ban the user (role hierarchy check)
         if (!member.bannable) {
             return await interaction.reply({ content: '❌ I cannot ban this user. Their role might be higher than mine or they have administrator permissions.', ephemeral: true });
         }

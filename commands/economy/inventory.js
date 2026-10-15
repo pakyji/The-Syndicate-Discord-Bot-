@@ -1,91 +1,82 @@
+/**
+ * /inventory — list what a member owns.
+ *
+ * Fixes vs. the original:
+ *  • Reads the unified store instead of the private economyStorage.json, so it
+ *    finally shows the same items the shop just sold (they were different files).
+ *  • The CWD-relative path is gone — starting the bot from another directory no
+ *    longer produces an empty inventory.
+ *  • Empty inventory now produces a helpful reply instead of a blank embed.
+ */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-
-const storagePath = path.join(__dirname, 'economyStorage.json');
-
-function loadEconomyData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({}, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
-}
-
-// Map of categories and item keys
-const itemCategories = {
-    "Currencies & Wealth": ["gold_nugget", "gold_bar", "diamond_gem", "platinum_ingot", "bitcoin", "ethereum", "ancient_relic", "bag_of_cash", "royal_treasury_bond"],
-    "Gambling & Boosters": ["loaded_dice", "four_leaf_clover", "rabbit_foot", "golden_ticket", "vip_casino_pass", "casino_chip_legendary", "lucky_coin", "card_shark_deck", "dealers_visor", "loaded_roulette_ball"],
-    "Legendary Trophies": ["golden_skull", "diamond_crown", "cursed_amulet", "hackers_usb", "the_holy_grail", "dragon_scale", "infinity_orb", "pharaohs_mask", "stellar_meteorite"],
-    "Combat & Heist Gear": ["iron_dagger", "combat_knife", "submachine_gun", "assault_rifle", "sniper_rifle", "combat_armor", "night_vision_goggles", "smoke_grenade", "c4_explosive_charge"],
-    "Protection & Security": ["vault_key", "iron_padlock", "digital_firewall", "forcefield_shield", "security_camera", "guard_dog_contract", "laser_tripwire"],
-    "Consumables & Potions": ["energy_drink", "potion_of_greed", "lucky_cocktail", "energy_coffee", "mystery_box", "adrenaline_shot", "elixir_of_wealth", "serum_of_invisibility"],
-    "Tools & Working Gear": ["wooden_pickaxe", "iron_pickaxe", "diamond_pickaxe", "netherite_drill", "metal_detector", "fishing_rod", "deep_sea_submersible"],
-    "Pets & Companions": ["pet_hamster", "guard_cat", "loyal_dog", "exotic_parrot", "baby_dragon", "cybernetic_panther", "phoenix_hatchling"],
-    "Tech & Hacking": ["old_laptop", "rig_mining_gpu", "quantum_server", "master_decoder", "ai_neural_assistant"],
-    "Licenses & Permits": ["gun_permit", "casino_license", "immunity_card", "tax_evasion_certificate"],
-    "Real Estate & Assets": ["small_shack", "suburban_house", "downtown_apartment", "commercial_warehouse", "luxury_casino_building"],
-    "Food & Luxury Items": ["golden_pizza", "caviar_plate", "sports_car", "private_yacht", "penthouse_deed", "private_jet", "supercar_collection", "private_island"]
-};
-
-// Helper function to format item names cleanly
-function formatItemName(key) {
-    return key.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-}
+const store = require('../../lib/data');
+const { itemName, money } = require('../../lib/economy');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('inventory')
-        .setDescription('Check your items, collectibles, weapons, and assets.')
-        .addUserOption(option =>
-            option.setName('user')
-                .setDescription('Check another user\'s inventory')
-                .setRequired(false)),
+        .setDescription('View your items and minerals')
+        .addUserOption((option) => option
+            .setName('user')
+            .setDescription('View another member\'s inventory')
+            .setRequired(false)),
+
+    category: 'Economy',
 
     async execute(interaction) {
-        await interaction.deferReply();
-
         const targetUser = interaction.options.getUser('user') || interaction.user;
-        const economyData = loadEconomyData();
 
-        const userProfile = economyData[targetUser.id] || { wallet: 0, bank: 0, inventory: {} };
-        const userInventory = userProfile.inventory || {};
+        if (targetUser.bot) {
+            return interaction.reply({ content: '🤖 Bots do not have an inventory.', ephemeral: true });
+        }
+
+        const inventory = store.getInventory(targetUser.id);
+        const entries = Object.entries(inventory).filter(([, qty]) => Number(qty) > 0);
+
+        const { level, xp } = store.getLevel(targetUser.id);
+        const wallet = store.getWallet(targetUser.id);
+        const bank = store.getBank(targetUser.id);
+
+        if (!entries.length) {
+            const embed = new EmbedBuilder()
+                .setColor(0x808080)
+                .setTitle(`🎒 ${targetUser.username}'s Inventory`)
+                .setDescription('Empty. Buy tools with `/shop` or find minerals with `/mine`.')
+                .addFields({ name: 'Wallet', value: money(wallet), inline: true })
+                .setTimestamp();
+            return interaction.reply({ embeds: [embed], ephemeral: targetUser.id !== interaction.user.id });
+        }
+
+        // Group by category for readability.
+        const byCategory = new Map();
+        for (const [key, qty] of entries) {
+            const category = itemName(key) ? categoryOf(key) : 'Other';
+            if (!byCategory.has(category)) byCategory.set(category, []);
+            byCategory.get(category).push(`• ${itemName(key)} — x${qty}`);
+        }
 
         const embed = new EmbedBuilder()
-            .setColor(0x00AE86)
+            .setColor(0x4169e1)
             .setTitle(`🎒 ${targetUser.username}'s Inventory`)
-            .setThumbnail(targetUser.displayAvatarURL({ dynamic: true }))
-            .addFields(
-                { name: '🪙 Wallet Balance', value: `\`$${(userProfile.wallet || 0).toLocaleString()}\``, inline: true },
-                { name: '🏦 Bank Balance', value: `\`$${(userProfile.bank || 0).toLocaleString()}\``, inline: true }
-            )
+            .setDescription(`**Level ${level}** (${xp} XP) · Wallet ${money(wallet)} · Bank ${money(bank)}`)
+            .setThumbnail(targetUser.displayAvatarURL({ extension: 'png', size: 128 }))
             .setTimestamp();
 
-        let hasItems = false;
-
-        for (const [categoryName, itemsList] of Object.entries(itemCategories)) {
-            let categoryContent = [];
-
-            for (const itemKey of itemsList) {
-                const quantity = userInventory[itemKey] || 0;
-                if (quantity > 0) {
-                    categoryContent.push(`• **${formatItemName(itemKey)}**: \`x${quantity}\``);
-                    hasItems = true;
-                }
-            }
-
-            if (categoryContent.length > 0) {
-                embed.addFields({
-                    name: `📁 ${categoryName}`,
-                    value: categoryContent.join('\n'),
-                    inline: false
-                });
-            }
+        for (const [category, lines] of byCategory) {
+            embed.addFields({ name: `📁 ${category}`, value: lines.join('\n').slice(0, 1024), inline: false });
         }
 
-        if (!hasItems) {
-            embed.setDescription('*Your inventory is currently completely empty! Win games or buy items to fill it up.*');
-        }
-
-        await interaction.editReply({ embeds: [embed] });
+        return interaction.reply({ embeds: [embed], ephemeral: targetUser.id !== interaction.user.id });
     },
 };
+
+/** Cheap category lookup without importing the whole catalog shape. */
+function categoryOf(key) {
+    try {
+        // eslint-disable-next-line global-require
+        const { ITEMS } = require('../../lib/economy');
+        return ITEMS[key]?.category || 'Other';
+    } catch {
+        return 'Other';
+    }
+}

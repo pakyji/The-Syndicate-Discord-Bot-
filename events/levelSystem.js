@@ -1,41 +1,45 @@
-const { EmbedBuilder } = require('discord.js');
+/**
+ * XP / levelling.
+ *
+ * Fixes vs. the original:
+ *  • XP and levels are PERSISTED. The original kept them in a plain in-memory
+ *    `Map`, so every restart wiped the entire server's progression — and
+ *    `/level` then returned a hardcoded fake string instead of real data.
+ *  • Cooldowns use an expiry-timestamp tracker with eviction instead of an
+ *    unpruned Map.
+ *  • Level-up announcements are optional and rate-limited so a busy channel
+ *    cannot be flooded.
+ *  • The XP curve is configurable rather than hardcoded to level*100.
+ */
+const { Events, EmbedBuilder } = require('discord.js');
+const data = require('../lib/data');
+const config = require('../lib/config');
+const { Cooldowns } = require('../lib/cooldowns');
 
-const levels = new Map();
-const XP_PER_MESSAGE = 15;
-const XP_COOLDOWN = 60000;
-const cooldowns = new Map();
+const cooldowns = new Cooldowns(config.levels.xpCooldownMs, 10000);
 
 module.exports = {
-    name: 'messageCreate',
+    name: Events.MessageCreate,
+
     async execute(message) {
-        if (!message.guild || message.author.bot) return;
+        if (message.author.bot || !message.guild) return;
+        if (!message.content || message.content.length < 2) return;
+        if (message.system) return;
 
         const userId = message.author.id;
-        const now = Date.now();
+        if (!cooldowns.take(userId)) return;
 
-        if (cooldowns.has(userId)) {
-            const expirationTime = cooldowns.get(userId) + XP_COOLDOWN;
-            if (now < expirationTime) return;
-        }
-        cooldowns.set(userId, now);
+        const result = await data.addXp(userId, config.levels.xpPerMessage);
+        if (!result || !result.levelledUp) return;
+        if (!config.levels.announceLevelUps) return;
 
-        let userData = levels.get(userId) || { xp: 0, level: 1 };
-        userData.xp += XP_PER_MESSAGE;
+        const embed = new EmbedBuilder()
+            .setColor('#FFD700')
+            .setDescription(
+                `🎉 Congratulations ${message.author} — you reached **Level ${result.level}**! 🚀`,
+            )
+            .setTimestamp();
 
-        const requiredXp = userData.level * 100;
-
-        if (userData.xp >= requiredXp) {
-            userData.level += 1;
-            userData.xp = 0;
-
-            // Simple & Clean Level Up Message in English
-            const levelEmbed = new EmbedBuilder()
-                .setColor('#FFD700')
-                .setDescription(`🎉 Congratulations <@${userId}>! You have leveled up to **Level ${userData.level}**! 🚀`);
-
-            await message.channel.send({ embeds: [levelEmbed] }).catch(() => {});
-        }
-
-        levels.set(userId, userData);
+        await message.channel.send({ embeds: [embed] }).catch(() => {});
     },
 };

@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Secrets — NEVER commit this
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Runtime user data (balances, levels, warnings, per-guild settings).
+# Created on first boot, migrated automatically from the legacy files.
+#
+# NOTE: this must be `data/*` and NOT `data/`. Git never descends into an
+# excluded directory, so with `data/` the negation below is inert and
+# data/.gitkeep can never be committed — the folder then silently goes missing
+# on a fresh clone. `data/*` ignores the contents while still letting the
+# negation re-include the placeholder.
+data/*
+!data/.gitkeep
+
+# Runtime files older versions created in the repo root
+twitchConfig.json
+
+# Atomic-write temp files & quarantine copies from lib/store.js
+*.tmp
+*.corrupt-*.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Logs
+logs/
+*.log
+
+# Coverage / caches
+coverage/
+.eslintcache
+
+# Generated patch artifacts (kept outside the repo — see DEPLOY.md).
+# Committing one inflates the diff by ~70k lines and makes the patch self-referential.
+*.patch
+*.diff

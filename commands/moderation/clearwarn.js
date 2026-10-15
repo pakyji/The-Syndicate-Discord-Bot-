@@ -1,81 +1,97 @@
+/**
+ * /clearwarn — remove one or all warnings for a member.
+ *
+ * Fixes vs. the original:
+ *  • Read/wrote `interaction.client.autoWarnings`, an in-memory Map created in
+ *    index.js, so every warning vanished on restart. Now backed by the persisted
+ *    store, matching the rewritten /warn.
+ *  • No role-hierarchy check — a junior mod could clear the warnings of an admin.
+ *  • The invalid-ID branch built its error string with string concatenation
+ *    around a template literal, which produced broken output.
+ *  • Replies are guarded so a deferred interaction cannot throw on a second reply.
+ */
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const store = require('../../lib/data');
+const perms = require('../../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('clearwarn')
-        .setDescription('Clear warnings for a user')
-        .addUserOption(option =>
-            option.setName('target')
-                .setDescription('The user whose warnings you want to clear')
-                .setRequired(true))
-        .addIntegerOption(option =>
-            option.setName('warn_id')
-                .setDescription('The specific warning ID to remove (Leave blank to clear all)')
-                .setRequired(false))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers), // Requires moderation permissions
+        .setDescription("Clear a member's warnings")
+        .addUserOption((option) => option
+            .setName('target')
+            .setDescription('The member whose warnings to clear')
+            .setRequired(true))
+        .addIntegerOption((option) => option
+            .setName('warn_id')
+            .setDescription('Specific warning number to remove (blank = clear all)')
+            .setMinValue(1)
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+        .setDMPermission(false),
 
     category: 'Moderation',
 
     async execute(interaction) {
-        try {
-            const target = interaction.options.getUser('target');
-            const warnId = interaction.options.getInteger('warn_id');
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ModerateMembers))) return;
 
-            // Access global/client autoWarnings map initialized in index.js
-            const userWarnings = interaction.client.autoWarnings;
+        const target = interaction.options.getUser('target');
+        const warnId = interaction.options.getInteger('warn_id');
 
-            if (!userWarnings || !userWarnings.has(target.id) || userWarnings.get(target.id).length === 0) {
-                return interaction.reply({
-                    content: `⚠️ **${target.tag}** has no active warnings to clear.`,
-                    ephemeral: true
-                });
-            }
-
-            let warningsList = userWarnings.get(target.id);
-
-            if (warnId !== null) {
-                // Clear a specific warning by index/ID
-                if (warnId < 1 || warnId > warningsList.length) {
-                    return interaction.reply({
-                        content: `❌ Invalid warning ID! **${target.tag}** has warnings numbered between ` + `1 and ${warningsList.length}.`,
-                        ephemeral: true
-                    });
-                }
-
-                // Remove the specific warning
-                const removed = warningsList.splice(warnId - 1, 1);
-                userWarnings.set(target.id, warningsList);
-
-                const embed = new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setTitle('🛡️ Warning Cleared')
-                    .setDescription(`Successfully removed warning **#${warnId}** from **${target.tag}**.\n\n` +
-                        `🗑️ **Removed Reason:** ${removed[0].reason || 'No reason provided'}`)
-                    .setTimestamp();
-
-                return interaction.reply({ embeds: [embed] });
-
-            } else {
-                // Clear all warnings for the user
-                userWarnings.delete(target.id);
-
-                const embed = new EmbedBuilder()
-                    .setColor(0x00FF00)
-                    .setTitle('🛡️ All Warnings Cleared')
-                    .setDescription(`Successfully cleared **all** warnings for **${target.tag}**.`)
-                    .setTimestamp();
-
-                return interaction.reply({ embeds: [embed] });
-            }
-
-        } catch (error) {
-            console.error('Error in clearwarn command:', error);
-            if (!interaction.replied && !interaction.deferred) {
-                return interaction.reply({
-                    content: '❌ An error occurred while executing the clearwarn command.',
-                    ephemeral: true
-                });
-            }
+        const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+        if (member && !perms.canModerate(interaction.member, member)) {
+            return interaction.reply({
+                content: '❌ You cannot clear the warnings of a member who holds an equal or higher role than you.',
+                ephemeral: true,
+            });
         }
+
+        const existing = store.getWarnings(target.id);
+        if (!existing.length) {
+            return interaction.reply({
+                content: `⚠️ **${target.username}** has no active warnings.`,
+                ephemeral: true,
+            });
+        }
+
+        /* ── Remove a single warning ─────────────────────────── */
+        if (warnId !== null) {
+            if (warnId < 1 || warnId > existing.length) {
+                return interaction.reply({
+                    content: `❌ Invalid warning ID. **${target.username}** has warnings numbered 1 to ${existing.length}.`,
+                    ephemeral: true,
+                });
+            }
+
+            const removed = await store.removeWarning(target.id, warnId);
+            if (!removed) {
+                return interaction.reply({ content: '❌ That warning no longer exists.', ephemeral: true });
+            }
+
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00)
+                .setTitle('🛡️ Warning Cleared')
+                .setDescription(
+                    `Removed warning **#${warnId}** from ${target}.\n`
+                    + `**Reason was:** ${removed.reason || 'No reason provided'}\n`
+                    + `**Remaining:** ${store.getWarnings(target.id).length}`,
+                )
+                .setFooter({ text: `By ${interaction.user.tag}` })
+                .setTimestamp();
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        /* ── Clear all ───────────────────────────────────────── */
+        const cleared = await store.clearWarnings(target.id);
+
+        const embed = new EmbedBuilder()
+            .setColor(0x00ff00)
+            .setTitle('🛡️ All Warnings Cleared')
+            .setDescription(`Cleared **${cleared}** warning(s) for ${target}.`)
+            .setFooter({ text: `By ${interaction.user.tag}` })
+            .setTimestamp();
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
     },
 };

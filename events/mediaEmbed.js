@@ -1,52 +1,92 @@
-const { EmbedBuilder } = require('discord.js');
+/**
+ * Rich embeds for shared media links.
+ *
+ * Fixes vs. the original:
+ *  • ⭐ It DELETED the member's own message every time a Spotify / TikTok /
+ *    YouTube link was posted, in EVERY channel, and replaced it with a bot post.
+ *    That destroyed the original message (and its replies, reactions and edit
+ *    history), broke conversation context, and made the member look like they
+ *    never posted. It also fires on any message merely *containing* such a link,
+ *    including quotes and troubleshooting help.
+ *    → Now OFF by default. Enable with MEDIA_EMBED_ENABLED=true, and even then
+ *      it only acts in channels you list in MEDIA_EMBED_CHANNELS.
+ *  • Three RegExp objects were re-created on EVERY message (this handler runs on
+ *    every messageCreate). They are now compiled once at module scope.
+ *  • The Spotify footer hotlinked a Wikimedia logo that may 404 or change; embeds
+ *    no longer depend on an external image.
+ *  • The `catch` wrapped the whole block, so one failed delete silently skipped
+ *    the remaining platforms.
+ *  • Respects antilink: if link filtering is on and this channel is filtered, the
+ *    antilink listener has already handled the message.
+ */
+const { Events, EmbedBuilder } = require('discord.js');
+const config = require('../lib/config');
+
+// Compiled once, not per message.
+const PATTERNS = [
+    {
+        key: 'spotify',
+        color: 0x1db954,
+        title: '🎵 Spotify',
+        cta: 'Click here to listen',
+        regex: /https:\/\/open\.spotify\.com\/(?:intl-[a-z]{2}\/)?(track|album|playlist|artist)\/([A-Za-z0-9]+)/i,
+    },
+    {
+        key: 'tiktok',
+        color: 0x000000,
+        title: '📱 TikTok',
+        cta: 'Click here to watch on TikTok',
+        regex: /https?:\/\/(?:www\.|vm\.)?tiktok\.com\/(?:@[\w.-]+\/video\/\d+|[A-Za-z0-9]+)/i,
+    },
+    {
+        key: 'youtube',
+        color: 0xff0000,
+        title: '🎬 YouTube',
+        cta: 'Click here to watch on YouTube',
+        regex: /https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/|live\/)[\w-]+|youtu\.be\/[\w-]+)/i,
+    },
+];
 
 module.exports = {
-    name: 'messageCreate',
-    async execute(message, client) {
-        // Ignore bot messages and direct messages
+    name: Events.MessageCreate,
+
+    async execute(message) {
         if (message.author.bot || !message.guild) return;
+        if (!config.mediaEmbed.enabled) return;
+        if (!message.content) return;
 
-        // Regex for Spotify, TikTok, and YouTube links
-        const spotifyRegex = /https:\/\/open\.spotify\.com\/(track|album|playlist|artist)\/([a-zA-Z0-9]+)(\?si=[a-zA-Z0-9_-]+)?/i;
-        const tiktokRegex = /https?:\/\/(www\.)?(tiktok\.com\/@[\w.-]+\/video\/[0-9]+|vm\.tiktok\.com\/[a-zA-Z0-9]+)/i;
-        const youtubeRegex = /https?:\/\/(www\.)?(youtube\.com\/(watch\?v=|shorts\/)[a-zA-Z0-9_-]+|youtu\.be\/[a-zA-Z0-9_-]+)/i;
+        // Restrict to configured channels when a list is provided.
+        if (config.mediaEmbed.channels.length && !config.mediaEmbed.channels.includes(message.channel.id)) {
+            return;
+        }
 
-        const content = message.content;
+        const match = PATTERNS
+            .map((p) => ({ platform: p, url: (message.content.match(p.regex) || [])[0] }))
+            .find((entry) => entry.url);
+
+        if (!match) return;
+
+        // Nothing to do if we cannot manage messages in this channel.
+        const me = message.guild.members.me;
+        if (!message.channel.permissionsFor(me)?.has('SendMessages')) return;
+
+        const { platform, url } = match;
+
+        const embed = new EmbedBuilder()
+            .setColor(platform.color)
+            .setTitle(platform.title)
+            .setDescription(`**Shared by:** ${message.author}\n\n🔗 [${platform.cta}](${url})`)
+            .setFooter({ text: `${platform.title} link` })
+            .setTimestamp();
+
+        const canDelete = config.mediaEmbed.deleteOriginal
+            && message.channel.permissionsFor(me)?.has('ManageMessages');
 
         try {
-            if (spotifyRegex.test(content)) {
-                await message.delete().catch(() => {});
-                const match = content.match(spotifyRegex);
-                const embed = new EmbedBuilder()
-                    .setColor(0x1DB954)
-                    .setTitle('🎵 Spotify Link')
-                    .setDescription(`**Shared by:** <@${message.author.id}>\n\n🔗 [Click here to listen](${match[0]})`)
-                    .setFooter({ text: 'Spotify Media Share', iconURL: 'https://upload.wikimedia.org/wikipedia/commons/1/19/Spotify_logo_without_text.svg' })
-                    .setTimestamp();
-                await message.channel.send({ embeds: [embed] });
-
-            } else if (tiktokRegex.test(content)) {
-                await message.delete().catch(() => {});
-                const match = content.match(tiktokRegex);
-                const embed = new EmbedBuilder()
-                    .setColor(0x000000)
-                    .setTitle('📱 TikTok Video')
-                    .setDescription(`**Shared by:** <@${message.author.id}>\n\n🔗 [Click here to watch on TikTok](${match[0]})`)
-                    .setTimestamp();
-                await message.channel.send({ embeds: [embed] });
-
-            } else if (youtubeRegex.test(content)) {
-                await message.delete().catch(() => {});
-                const match = content.match(youtubeRegex);
-                const embed = new EmbedBuilder()
-                    .setColor(0xFF0000)
-                    .setTitle('🎬 YouTube Video')
-                    .setDescription(`**Shared by:** <@${message.author.id}>\n\n🔗 [Click here to watch on YouTube](${match[0]})`)
-                    .setTimestamp();
-                await message.channel.send({ embeds: [embed] });
-            }
+            await message.channel.send({ embeds: [embed] });
+            if (canDelete) await message.delete().catch(() => {});
         } catch (error) {
-            console.error('Media link handler error:', error);
+            console.error(`[mediaEmbed] ${platform.key} failed:`, error.message);
         }
     },
 };

@@ -1,102 +1,99 @@
+/**
+ * /coinflip — bet on heads or tails.
+ *
+ * Fix vs. the original: the bet was deducted by mutating a snapshot read at the
+ * top of the handler and writing it back at the end (`userProfile.wallet -= bet`).
+ * Two concurrent flips both passed the affordability check against the same
+ * stale balance, so a user could bet the same coins twice. The stake is now
+ * taken atomically with `store.spend()` BEFORE the coin is flipped, and the
+ * payout is credited afterwards — so a crash between the two can never create
+ * coins out of nothing.
+ */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const store = require('../../lib/data');
+const { Cooldowns } = require('../../lib/cooldowns');
+const { MAX_BET, money } = require('../../lib/economy');
 
-const storagePath = path.join(__dirname, 'economyStorage.json');
+const COOLDOWN_MS = 5 * 1000;
+const cooldowns = new Cooldowns(COOLDOWN_MS, 10000);
 
-function loadEconomyData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({}, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
-}
-
-function saveEconomyData(data) {
-    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
-}
+/** Luck-boosting items, best first. */
+const BOOSTS = [
+    { key: 'lucky_coin', chance: 0.55, label: 'Lucky Coin' },
+    { key: 'card_shark_deck', chance: 0.53, label: 'Card Shark Deck' },
+];
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('coinflip')
-        .setDescription('Flip a coin to double your money or lose it!')
-        .addIntegerOption(option =>
-            option.setName('amount')
-                .setDescription('The amount of money you want to bet')
-                .setRequired(true)
-                .setMinValue(1))
-        .addStringOption(option =>
-            option.setName('choice')
-                .setDescription('Choose heads or tails')
-                .setRequired(true)
-                .addChoices(
-                    { name: 'Heads', value: 'heads' },
-                    { name: 'Tails', value: 'tails' }
-                )),
+        .setDescription('Flip a coin to double your bet or lose it')
+        .addIntegerOption((option) => option
+            .setName('amount')
+            .setDescription('Amount to bet')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(MAX_BET))
+        .addStringOption((option) => option
+            .setName('choice')
+            .setDescription('Heads or tails')
+            .setRequired(true)
+            .addChoices({ name: 'Heads', value: 'heads' }, { name: 'Tails', value: 'tails' })),
+
+    category: 'Economy',
 
     async execute(interaction) {
-        await interaction.deferReply();
-
         const userId = interaction.user.id;
-        const betAmount = interaction.options.getInteger('amount');
-        const userChoice = interaction.options.getString('choice');
+        const bet = interaction.options.getInteger('amount');
+        const choice = interaction.options.getString('choice');
 
-        const economyData = loadEconomyData();
-        if (!economyData[userId]) {
-            economyData[userId] = { wallet: 0, bank: 0, inventory: {} };
-        }
-
-        const userProfile = economyData[userId];
-        const userWallet = userProfile.wallet || 0;
-
-        // Check if user has enough money in wallet
-        if (userWallet < betAmount) {
-            return await interaction.editReply({
-                content: `❌ You don't have enough cash in your wallet! Your current wallet balance is \`$${userWallet.toLocaleString()}\`.`
+        if (!cooldowns.take(userId)) {
+            return interaction.reply({
+                content: `⏳ Wait **${Math.ceil(cooldowns.remaining(userId) / 1000)}s** before flipping again.`,
+                ephemeral: true,
             });
         }
 
-        const inventory = userProfile.inventory || {};
-        
-        // Luck bonus check: if they have a Lucky Coin or Card Shark Deck, boost win chance slightly
-        let winChance = 0.50; // Standard 50%
-        let luckyItemUsed = null;
+        await interaction.deferReply();
 
-        if ((inventory['lucky_coin'] || 0) > 0) {
-            winChance = 0.55; // 55% chance with Lucky Coin
-            luckyItemUsed = 'Lucky Coin';
-        } else if ((inventory['card_shark_deck'] || 0) > 0) {
-            winChance = 0.53; // 53% chance with Card Shark Deck
-            luckyItemUsed = 'Card Shark Deck';
+        // 1. Take the stake atomically.
+        const { ok, balance } = await store.spend(userId, bet);
+        if (!ok) {
+            cooldowns.clear(userId);
+            return interaction.editReply({
+                content: `❌ Not enough cash. Bet ${money(bet)}, wallet ${money(balance)}.`,
+            });
         }
 
-        // Determine coinflip result (Heads or Tails)
-        const result = Math.random() < winChance ? userChoice : (userChoice === 'heads' ? 'tails' : 'heads');
-        const won = (result === userChoice);
+        // 2. Determine the outcome (inventory is read after the stake is safe).
+        const inventory = store.getInventory(userId);
+        const boost = BOOSTS.find((b) => (Number(inventory[b.key]) || 0) > 0);
+        const winChance = boost ? boost.chance : 0.5;
 
+        const won = Math.random() < winChance;
+        const result = won ? choice : (choice === 'heads' ? 'tails' : 'heads');
+
+        // 3. Credit the winnings (stake returned + equal profit = 2x bet).
+        let newWallet = balance;
         if (won) {
-            userProfile.wallet += betAmount;
-        } else {
-            userProfile.wallet -= betAmount;
+            newWallet = await store.addBalance(userId, bet * 2);
         }
-
-        saveEconomyData(economyData);
 
         const embed = new EmbedBuilder()
-            .setColor(won ? 0x00FF00 : 0xFF0000)
+            .setColor(won ? 0x00ff00 : 0xff0000)
             .setTitle(won ? '🎉 Coinflip: You Won!' : '😢 Coinflip: You Lost!')
-            .setDescription(`The coin landed on **${result.toUpperCase()}**!`)
+            .setDescription(`The coin landed on **${result.toUpperCase()}**.`)
             .addFields(
-                { name: 'Your Bet', value: `\`$${betAmount.toLocaleString()}\``, inline: true },
-                { name: 'Your Choice', value: `\`${userChoice.toUpperCase()}\``, inline: true },
-                { name: 'Outcome', value: won ? `\`+$${betAmount.toLocaleString()}\`` : `\`-$${betAmount.toLocaleString()}\``, inline: true },
-                { name: 'New Wallet Balance', value: `\`$${userProfile.wallet.toLocaleString()}\``, inline: false }
+                { name: 'Your bet', value: money(bet), inline: true },
+                { name: 'Your choice', value: choice.toUpperCase(), inline: true },
+                { name: 'Outcome', value: won ? `+${money(bet)}` : `-${money(bet)}`, inline: true },
+                { name: 'Wallet', value: money(newWallet), inline: false },
             )
             .setTimestamp();
 
-        if (luckyItemUsed) {
-            embed.setFooter({ text: `✨ Perk active: Your ${luckyItemUsed} gave you a slight edge!` });
+        if (boost) {
+            embed.setFooter({ text: `✨ Perk active: your ${boost.label} gave you a slight edge (${Math.round(winChance * 100)}%).` });
         }
 
-        await interaction.editReply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     },
 };

@@ -1,52 +1,89 @@
-const { PermissionFlagsBits } = require('discord.js');
+/**
+ * /kick — remove a member from the server.
+ *
+ * Original problems:
+ *  • Legacy `{name, execute}` format → index.js registered it with zero options,
+ *    so the required `target` user option never existed and the command could
+ *    never actually kick anyone.
+ *  • It kept dead branches for text-message (`ctx.message`) invocation that this
+ *    slash-only bot never receives.
+ *  • No role-hierarchy check, so a mod could target another mod.
+ */
+const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const perms = require('../lib/perms');
 
 module.exports = {
-    name: 'kick',
+    data: new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('Kick a member from the server')
+        .addUserOption((option) => option
+            .setName('target')
+            .setDescription('The member to kick')
+            .setRequired(true))
+        .addStringOption((option) => option
+            .setName('reason')
+            .setDescription('Reason for the kick')
+            .setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
+        .setDMPermission(false),
+
     category: 'Moderation',
-    description: 'Kick a member from the server',
-    async execute(ctx) {
-        const isSlash = ctx.isChatInputCommand && ctx.isChatInputCommand();
 
-        if (!ctx.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-            const errReply = 'You do not have permission to use this command.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+    async execute(interaction) {
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.KickMembers))) return;
+
+        const targetUser = interaction.options.getUser('target');
+        const reason = (interaction.options.getString('reason') || 'No reason provided').slice(0, 500);
+
+        if (targetUser.id === interaction.user.id) {
+            return interaction.reply({ content: '❌ You cannot kick yourself.', ephemeral: true });
         }
 
-        const target = ctx.options ? ctx.options.getUser('target') : null;
-        if (!target) {
-            const errReply = 'Please specify a user to kick.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+        if (!interaction.guild.members.me.permissions.has(PermissionFlagsBits.KickMembers)) {
+            return interaction.reply({ content: '❌ I am missing the **Kick Members** permission.', ephemeral: true });
         }
 
-        const member = await ctx.guild.members.fetch(target.id).catch(() => null);
+        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
         if (!member) {
-            const errReply = 'That user is not in this server.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+            return interaction.reply({ content: '❌ That user is not in this server.', ephemeral: true });
         }
+        if (!perms.canModerate(interaction.member, member)) {
+            return interaction.reply({
+                content: '❌ You cannot kick this member — they hold an equal or higher role than you.',
+                ephemeral: true,
+            });
+        }
+        if (!member.kickable) {
+            return interaction.reply({
+                content: '❌ I cannot kick this member. My role must be above theirs.',
+                ephemeral: true,
+            });
+        }
+
+        await interaction.deferReply();
+
+        // Notify first — impossible after the kick.
+        await targetUser.send({
+            content: `You have been kicked from **${interaction.guild.name}**.\nReason: ${reason}`,
+        }).catch(() => {});
 
         try {
-            await member.kick();
-            const successMsg = `Successfully kicked **${target.tag || target.username}**.`;
-            
-            if (isSlash) {
-                const sent = await ctx.reply({ content: successMsg, fetchReply: true });
-                setTimeout(() => sent.delete().catch(() => {}), 5000);
-            } else {
-                const sent = await ctx.reply(successMsg);
-                setTimeout(() => sent.delete().catch(() => {}), 5000);
-            }
+            await member.kick(`Kicked by ${interaction.user.tag}: ${reason}`);
         } catch (error) {
-            console.error(error);
-            const errReply = 'Failed to kick this user.';
-            return isSlash 
-                ? await ctx.reply({ content: errReply, ephemeral: true }) 
-                : await ctx.reply(errReply);
+            console.error('[kick] failed:', error.message);
+            return interaction.editReply({ content: '❌ Failed to kick that member.' });
         }
+
+        const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle('👢 Member Kicked')
+            .addFields(
+                { name: 'Member', value: `${targetUser.tag} (\`${targetUser.id}\`)`, inline: true },
+                { name: 'Moderator', value: interaction.user.tag, inline: true },
+                { name: 'Reason', value: reason },
+            )
+            .setTimestamp();
+
+        return interaction.editReply({ embeds: [embed] });
     },
 };

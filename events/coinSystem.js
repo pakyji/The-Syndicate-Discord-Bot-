@@ -1,50 +1,70 @@
+/**
+ * Passive coin earning.
+ *
+ * Fixes vs. the original:
+ *  • Coins now go to the SAME store the shop/mine/slots read from. Previously
+ *    earning wrote `coins.json` while spending wrote
+ *    `commands/economy/economyStorage.json`, so /balance and /shop disagreed.
+ *  • No synchronous read + full-file write on every single message. Writes are
+ *    debounced and the store caches reads in memory.
+ *  • The per-user `setTimeout` (one timer per member, unbounded Set) is replaced
+ *    by an expiry-timestamp tracker with eviction, so memory stays bounded.
+ *  • Verification is checked by role ID when configured, so a decoy role named
+ *    "Verified" no longer earns coins.
+ *  • Failures are logged instead of silently corrupting state.
+ */
 const { Events } = require('discord.js');
-const fs = require('fs');
-const path = './coins.json';
+const data = require('../lib/data');
+const config = require('../lib/config');
+const roles = require('../lib/roles');
+const { Cooldowns } = require('../lib/cooldowns');
 
-// Helper function to read/write coins database
-function getCoinsData() {
-    if (!fs.existsSync(path)) {
-        fs.writeFileSync(path, JSON.stringify({}));
-    }
-    return JSON.parse(fs.readFileSync(path, 'utf8'));
+const cooldowns = new Cooldowns(config.economy.earnCooldownMs, 10000);
+
+/** Debounce disk writes: coalesce bursts into one write every 5s. */
+let flushTimer = null;
+let dirty = false;
+
+function scheduleFlush() {
+    dirty = true;
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+        flushTimer = null;
+        if (!dirty) return;
+        dirty = false;
+        // Touching the store triggers its atomic write path.
+        data.read();
+    }, 5000);
+    flushTimer.unref?.();
 }
-
-function saveCoinsData(data) {
-    fs.writeFileSync(path, JSON.stringify(data, null, 2));
-}
-
-// Cooldown tracker to prevent coin farming via spam (60 seconds per user)
-const cooldowns = new Set();
 
 module.exports = {
     name: Events.MessageCreate,
-    async execute(message) {
-        // Ignore bots or messages outside servers
-        if (message.author.bot || !message.guild) return;
 
-        // Only give coins to members with the 'Verified' role
-        const VERIFIED_ROLE_NAME = 'Verified';
-        const member = message.member;
-        if (!member || !member.roles.cache.some(r => r.name === VERIFIED_ROLE_NAME)) return;
+    async execute(message) {
+        if (message.author.bot || !message.guild) return;
+        if (!message.content || message.content.length < 2) return;
+        if (message.system) return;
+
+        // Only verified members earn, when that rule is on.
+        if (config.economy.requireVerified && !roles.hasVerifiedRole(message.member)) return;
 
         const userId = message.author.id;
+        if (!cooldowns.take(userId)) return;
 
-        // Cooldown check (60 seconds)
-        if (cooldowns.has(userId)) return;
+        const span = Math.max(0, config.economy.maxEarn - config.economy.minEarn);
+        const earned = Math.floor(Math.random() * (span + 1)) + config.economy.minEarn;
 
-        cooldowns.add(userId);
-        setTimeout(() => cooldowns.delete(userId), 60 * 1000);
-
-        // Load coins data and add random coins (5 to 15)
-        const coinsData = getCoinsData();
-        if (!coinsData[userId]) {
-            coinsData[userId] = 0;
+        const res = await data.addBalance(userId, earned);
+        if (res === undefined) {
+            // addBalance resolves to the new balance; undefined means the write failed.
+            console.error('[coins] failed to persist earned coins for', userId);
+            return;
         }
-
-        const earnedCoins = Math.floor(Math.random() * 11) + 5;
-        coinsData[userId] += earnedCoins;
-
-        saveCoinsData(coinsData);
-    }
+        scheduleFlush();
+    },
 };
+
+process.on('exit', () => {
+    if (flushTimer) clearTimeout(flushTimer);
+});

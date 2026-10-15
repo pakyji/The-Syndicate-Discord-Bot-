@@ -1,47 +1,55 @@
+/**
+ * /leaderboard — richest members.
+ *
+ * Fixes vs. the original:
+ *  • Unified store instead of the CWD-relative `./coins.json` (see balance.js).
+ *  • The original sorted `b[1] - a[1]` on raw JSON values with no numeric
+ *    coercion, so a non-numeric entry produced NaN and silently scrambled the
+ *    ordering.
+ *  • Users who have left the server are now filtered out instead of showing as
+ *    unresolvable IDs.
+ */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = './coins.json';
-
-function getCoinsData() {
-    if (!fs.existsSync(path)) return {};
-    return JSON.parse(fs.readFileSync(path, 'utf8'));
-}
+const data = require('../lib/data');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('leaderboard')
-        .setDescription('Shows the richest members with the most coins'),
+        .setDescription('Show the richest members'),
+
+    category: 'Economy',
 
     async execute(interaction) {
-        const coinsData = getCoinsData();
-        
-        // Convert object to an array of [userId, coins] and sort them highest to lowest
-        const sortedUsers = Object.entries(coinsData)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10); // Top 10 members
+        await interaction.deferReply();
 
-        if (sortedUsers.length === 0) {
-            return await interaction.reply({ content: 'No one has earned any coins yet!', ephemeral: true });
+        const rows = data.leaderboard(20);
+        if (!rows.length) {
+            return interaction.editReply({ content: '🪙 Nobody has earned any coins yet!' });
         }
 
-        let description = '';
-        for (let i = 0; i < sortedUsers.length; i++) {
-            const [userId, coins] = sortedUsers[i];
-            let medal = '🪙';
-            if (i === 0) medal = '🥇';
-            else if (i === 1) medal = '🥈';
-            else if (i === 2) medal = '🥉';
+        // Resolve names, skipping members no longer in the guild.
+        const lines = [];
+        const medals = ['🥇', '🥈', '🥉'];
 
-            description += `${medal} **#${i + 1}** <@${userId}> — **${coins}** coins\n`;
+        for (let i = 0; i < rows.length && lines.length < 10; i += 1) {
+            const row = rows[i];
+            const member = await interaction.guild.members.fetch(row.id).catch(() => null);
+            if (!member || member.user.bot) continue;
+
+            const prefix = medals[lines.length] || `**${lines.length + 1}.**`;
+            lines.push(`${prefix} ${member.user.username} — \`${row.balance.toLocaleString('en-US')}\` coins · Lv. ${row.level}`);
+        }
+
+        if (!lines.length) {
+            return interaction.editReply({ content: '🪙 No ranked members are still in the server.' });
         }
 
         const embed = new EmbedBuilder()
             .setColor('#FFD700')
-            .setTitle('🏆 Server Coin Leaderboard')
-            .setDescription(description)
-            .setTimestamp()
-            .setFooter({ text: 'Keep chatting to climb the ranks!' });
+            .setTitle(`🏆 ${interaction.guild.name} Coin Leaderboard`)
+            .setDescription(lines.join('\n'))
+            .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     },
 };

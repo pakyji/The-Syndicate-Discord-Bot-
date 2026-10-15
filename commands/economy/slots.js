@@ -1,121 +1,124 @@
+/**
+ * /slots — three-reel slot machine.
+ *
+ * Fix vs. the original: same read-modify-write race as /coinflip — the wallet
+ * was read once, mutated in memory across three branches, and written back at
+ * the end, so concurrent spins double-spent. The stake is now taken atomically
+ * before the reels spin.
+ *
+ * Also fixed: the reel display string was `[ ${slot1} \vert{}${slot2} | ${slot3} ]`,
+ * which renders a literal `\vert{}` in Discord. Replaced with a clean separator.
+ */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const store = require('../../lib/data');
+const { Cooldowns } = require('../../lib/cooldowns');
+const { MAX_BET, money } = require('../../lib/economy');
 
-const storagePath = path.join(__dirname, 'economyStorage.json');
+const SYMBOLS = ['🍒', '🍋', '🔔', '⭐', '💎', ' 7️⃣ '];
+const MEGA_SYMBOLS = [' 7️⃣ ', '💎'];
 
-function loadEconomyData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({}, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+const COOLDOWN_MS = 5 * 1000;
+const cooldowns = new Cooldowns(COOLDOWN_MS, 10000);
+
+const BOOSTS = [
+    { key: 'casino_chip_legendary', bonus: 0.08, label: 'Legendary Casino Chip' },
+    { key: 'golden_ticket', bonus: 0.04, label: 'Golden Ticket' },
+];
+
+function spin() {
+    return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
 }
-
-function saveEconomyData(data) {
-    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
-}
-
-// Slot symbols and their multipliers
-const symbols = ['🍒', '🍋', '🍊', '🍇', '🔔', '💎', ' 7️⃣ '];
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('slots')
-        .setDescription('Play the slot machine and test your luck for a massive jackpot!')
-        .addIntegerOption(option =>
-            option.setName('amount')
-                .setDescription('The amount of money you want to bet')
-                .setRequired(true)
-                .setMinValue(1)),
+        .setDescription('Play the slot machine')
+        .addIntegerOption((option) => option
+            .setName('amount')
+            .setDescription('Amount to bet')
+            .setRequired(true)
+            .setMinValue(1)
+            .setMaxValue(MAX_BET)),
+
+    category: 'Economy',
 
     async execute(interaction) {
-        await interaction.deferReply();
-
         const userId = interaction.user.id;
-        const betAmount = interaction.options.getInteger('amount');
+        const bet = interaction.options.getInteger('amount');
 
-        const economyData = loadEconomyData();
-        if (!economyData[userId]) {
-            economyData[userId] = { wallet: 0, bank: 0, inventory: {} };
-        }
-
-        const userProfile = economyData[userId];
-        const userWallet = userProfile.wallet || 0;
-
-        if (userWallet < betAmount) {
-            return await interaction.editReply({
-                content: `❌ You don't have enough cash in your wallet! Your current wallet balance is \`$${userWallet.toLocaleString()}\`.`
+        if (!cooldowns.take(userId)) {
+            return interaction.reply({
+                content: `⏳ The machine is spinning for someone else — wait **${Math.ceil(cooldowns.remaining(userId) / 1000)}s**.`,
+                ephemeral: true,
             });
         }
 
-        const inventory = userProfile.inventory || {};
-        
-        // Check for luxury casino items to give a slight luck boost
-        let jackpotChanceBonus = 0;
-        let luckyItemUsed = null;
+        await interaction.deferReply();
 
-        if ((inventory['casino_chip_legendary'] || 0) > 0) {
-            jackpotChanceBonus = 0.08; // +8% better outcomes
-            luckyItemUsed = 'Legendary Casino Chip';
-        } else if ((inventory['golden_ticket'] || 0) > 0) {
-            jackpotChanceBonus = 0.04; // +4% better outcomes
-            luckyItemUsed = 'Golden Ticket';
+        // 1. Atomic stake.
+        const { ok, balance } = await store.spend(userId, bet);
+        if (!ok) {
+            cooldowns.clear(userId);
+            return interaction.editReply({
+                content: `❌ Not enough cash. Bet ${money(bet)}, wallet ${money(balance)}.`,
+            });
         }
 
-        // Spin the 3 reels
-        let slot1 = symbols[Math.floor(Math.random() * symbols.length)];
-        let slot2 = symbols[Math.floor(Math.random() * symbols.length)];
-        let slot3 = symbols[Math.floor(Math.random() * symbols.length)];
+        // 2. Reels.
+        const inventory = store.getInventory(userId);
+        const boost = BOOSTS.find((b) => (Number(inventory[b.key]) || 0) > 0);
 
-        // If they have a lucky item and lost on a normal roll, give them a chance to reroll one symbol for a win
-        if (jackpotChanceBonus > 0 && slot1 !== slot2 && slot2 !== slot3) {
-            if (Math.random() < jackpotChanceBonus) {
-                slot2 = slot1; // Match second reel to first reel
-            }
+        const a = spin();
+        let b = spin();
+        const c = spin();
+
+        // Perk: on an otherwise-losing roll, a chance to match the second reel.
+        if (boost && a !== b && b !== c && Math.random() < boost.bonus) {
+            b = a;
         }
+
+        const triple = a === b && b === c;
+        const pair = !triple && (a === b || b === c || a === c);
 
         let payout = 0;
-        let resultMessage = '';
+        let message;
 
-        if (slot1 === slot2 && slot2 === slot3) {
-            // Jackpot (All 3 match)
-            if (slot1 === ' 7️⃣ ' || slot1 === '💎') {
-                payout = betAmount * 10; // Mega jackpot
-                resultMessage = `🎰 **JACKPOT!** All three matched! You won **10x** your bet!`;
+        if (triple) {
+            if (MEGA_SYMBOLS.includes(a)) {
+                payout = bet * 10;
+                message = '🎰 **JACKPOT!** All three matched — you won **10x** your bet!';
             } else {
-                payout = betAmount * 5; // Standard triple match
-                resultMessage = `🎉 **Big Win!** Three matching symbols! You won **5x** your bet!`;
+                payout = bet * 5;
+                message = '🎉 **Big Win!** Three matching symbols — you won **5x** your bet!';
             }
-            userProfile.wallet += (payout - betAmount); // Net profit added
-        } else if (slot1 === slot2 || slot2 === slot3 || slot1 === slot3) {
-            // Small win (2 match)
-            payout = Math.floor(betAmount * 1.5);
-            resultMessage = `✨ **Small Win!** Two matching symbols! You won **1.5x** your bet!`;
-            userProfile.wallet += (payout - betAmount);
+        } else if (pair) {
+            payout = Math.floor(bet * 1.5);
+            message = '✨ **Small Win!** Two matching symbols — you won **1.5x** your bet!';
         } else {
-            // Loss
-            payout = 0;
-            resultMessage = `😢 **Loss!** No matching symbols. Better luck next time!`;
-            userProfile.wallet -= betAmount;
+            message = '😢 **Loss!** No matching symbols. Better luck next time!';
         }
 
-        saveEconomyData(economyData);
+        // 3. Credit the payout (the stake was already taken).
+        let newWallet = balance;
+        if (payout > 0) {
+            newWallet = await store.addBalance(userId, payout);
+        }
 
         const embed = new EmbedBuilder()
-            .setColor(payout > 0 ? 0x00FF00 : 0xFF0000)
+            .setColor(payout > 0 ? 0x00ff00 : 0xff0000)
             .setTitle('🎰 Casino Slot Machine')
-            .setDescription(`[ ${slot1} \vert{}${slot2} | ${slot3} ]\n\n${resultMessage}`)
+            .setDescription(`│ ${a} │ ${b} │ ${c} │\n\n${message}`)
             .addFields(
-                { name: 'Bet Amount', value: `\`$${betAmount.toLocaleString()}\``, inline: true },
-                { name: 'Payout', value: `\`$${payout.toLocaleString()}\``, inline: true },
-                { name: 'New Wallet Balance', value: `\`$${userProfile.wallet.toLocaleString()}\``, inline: false }
+                { name: 'Bet', value: money(bet), inline: true },
+                { name: 'Payout', value: money(payout), inline: true },
+                { name: 'Wallet', value: money(newWallet), inline: true },
             )
             .setTimestamp();
 
-        if (luckyItemUsed) {
-            embed.setFooter({ text: `✨ Perk active: Your ${luckyItemUsed} helped tweak the reels!` });
+        if (boost) {
+            embed.setFooter({ text: `✨ Perk active: your ${boost.label} nudged the reels (+${Math.round(boost.bonus * 100)}%).` });
         }
 
-        await interaction.editReply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     },
 };

@@ -1,124 +1,102 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+/**
+ * /shop — browse and buy items.
+ *
+ * Fixes vs. the original:
+ *  • The purchase was a classic read-modify-write race: it read the wallet,
+ *    checked affordability, then wrote `wallet -= price` at the end. Two
+ *    concurrent purchases both passed the check and both deducted from the same
+ *    stale snapshot, letting a user double-spend. Now uses `store.spend()`,
+ *    which is atomic and returns ok=false when funds are insufficient — the item
+ *    is only granted AFTER the deduction succeeds.
+ *  • Item catalog moved to lib/economy.js (it was duplicated in five files and
+ *    had drifted).
+ *  • The `choices` list was hardcoded separately from `shopItems`, so the two
+ *    could disagree. Choices are now generated from the catalog.
+ *  • CWD-relative storage path replaced by the store.
+ */
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const store = require('../../lib/data');
+const { ITEMS, money } = require('../../lib/economy');
 
-const storagePath = path.join(__dirname, 'economyStorage.json');
-
-function loadEconomyData() {
-    if (!fs.existsSync(storagePath)) {
-        fs.writeFileSync(storagePath, JSON.stringify({}, null, 4));
-    }
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
-}
-
-function saveEconomyData(data) {
-    fs.writeFileSync(storagePath, JSON.stringify(data, null, 4));
-}
-
-// Lista di oggetti acquistabili con prezzi definiti
-const shopItems = {
-    "wooden_pickaxe": { name: "Wooden Pickaxe", price: 500, category: "Tools" },
-    "iron_pickaxe": { name: "Iron Pickaxe", price: 2500, category: "Tools" },
-    "diamond_pickaxe": { name: "Diamond Pickaxe", price: 10000, category: "Tools" },
-    "netherite_drill": { name: "Netherite Drill", price: 45000, category: "Tools" },
-    "lucky_coin": { name: "Lucky Coin", price: 5000, category: "Gambling" },
-    "loaded_dice": { name: "Loaded Dice", price: 7500, category: "Gambling" },
-    "card_shark_deck": { name: "Card Shark Deck", price: 12000, category: "Gambling" },
-    "iron_padlock": { name: "Iron Padlock", price: 3000, category: "Security" },
-    "vault_key": { name: "Vault Key", price: 15000, category: "Security" },
-    "energy_drink": { name: "Energy Drink", price: 350, category: "Consumables" },
-    "mystery_box": { name: "Mystery Box", price: 2000, category: "Consumables" },
-    "sports_car": { name: "Sports Car", price: 150000, category: "Luxury" }
-};
+const BUYABLE = Object.entries(ITEMS).filter(([, item]) => item.price > 0);
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('shop')
-        .setDescription('Browse the item shop and buy tools, gambling boosters, and security gear.')
-        .addStringOption(option =>
+        .setDescription('Browse the shop and buy tools, boosters and gear')
+        .addStringOption((option) => {
             option.setName('item')
-                .setDescription('The key or name of the item you want to buy')
-                .setRequired(false)
-                .addChoices(
-                    { name: 'Wooden Pickaxe ($500)', value: 'wooden_pickaxe' },
-                    { name: 'Iron Pickaxe ($2,500)', value: 'iron_pickaxe' },
-                    { name: 'Diamond Pickaxe ($10,000)', value: 'diamond_pickaxe' },
-                    { name: 'Netherite Drill ($45,000)', value: 'netherite_drill' },
-                    { name: 'Lucky Coin ($5,000)', value: 'lucky_coin' },
-                    { name: 'Loaded Dice ($7,500)', value: 'loaded_dice' },
-                    { name: 'Card Shark Deck ($12,000)', value: 'card_shark_deck' },
-                    { name: 'Iron Padlock ($3,000)', value: 'iron_padlock' },
-                    { name: 'Vault Key ($15,000)', value: 'vault_key' },
-                    { name: 'Energy Drink ($350)', value: 'energy_drink' },
-                    { name: 'Mystery Box ($2,000)', value: 'mystery_box' },
-                    { name: 'Sports Car ($150,000)', value: 'sports_car' }
-                )),
+                .setDescription('The item you want to buy')
+                .setRequired(false);
+            // Discord caps a select at 25 choices.
+            for (const [key, item] of BUYABLE.slice(0, 25)) {
+                option.addChoices({ name: `${item.name} (${money(item.price)})`, value: key });
+            }
+            return option;
+        }),
+
+    category: 'Economy',
 
     async execute(interaction) {
-        await interaction.deferReply();
-
         const userId = interaction.user.id;
-        const selectedItemKey = interaction.options.getString('item');
+        const selectedKey = interaction.options.getString('item');
 
-        const economyData = loadEconomyData();
-        if (!economyData[userId]) {
-            economyData[userId] = { wallet: 0, bank: 0, inventory: {} };
-        }
-
-        const userProfile = economyData[userId];
-        const userWallet = userProfile.wallet || 0;
-
-        // Se l'utente non ha scelto un oggetto, mostra la vetrina del negozio
-        if (!selectedItemKey) {
+        /* ── Storefront ─────────────────────────────────────────── */
+        if (!selectedKey) {
+            const wallet = store.getWallet(userId);
             const embed = new EmbedBuilder()
-                .setColor(0xFFD700)
+                .setColor(0xffd700)
                 .setTitle('🛒 Server Economy Shop')
-                .setDescription('Use `/shop [item]` to purchase any of the available items below using your wallet cash!')
+                .setDescription(`Your wallet: **${money(wallet)}**\nUse \`/shop item:<name>\` to buy.`)
                 .setTimestamp();
 
-            let categories = {};
-            for (const [key, data] of Object.entries(shopItems)) {
-                if (!categories[data.category]) categories[data.category] = [];
-                categories[data.category].push(`• **${data.name}**: \`$${data.price.toLocaleString()}\` \`(/shop item:${key})\``);
+            const byCategory = new Map();
+            for (const [key, item] of BUYABLE) {
+                if (!byCategory.has(item.category)) byCategory.set(item.category, []);
+                byCategory.get(item.category).push(`• **${item.name}** — ${money(item.price)} \`(${key})\``);
             }
 
-            for (const [catName, items] of Object.entries(categories)) {
-                embed.addFields({ name: `📁 ${catName}`, value: items.join('\n'), inline: false });
+            for (const [category, lines] of byCategory) {
+                // Discord field values cap at 1024 characters.
+                const value = lines.join('\n').slice(0, 1024);
+                embed.addFields({ name: `📁 ${category}`, value, inline: false });
             }
 
-            return await interaction.editReply({ embeds: [embed] });
+            return interaction.reply({ embeds: [embed], ephemeral: true });
         }
 
-        // Gestione dell'acquisto
-        const itemData = shopItems[selectedItemKey];
-        if (!itemData) {
-            return await interaction.editReply({ content: '❌ Invalid item selected!' });
+        /* ── Purchase ───────────────────────────────────────────── */
+        const item = ITEMS[selectedKey];
+        if (!item || item.price <= 0) {
+            return interaction.reply({ content: '❌ That item is not for sale.', ephemeral: true });
         }
 
-        if (userWallet < itemData.price) {
-            return await interaction.editReply({
-                content: `❌ You cannot afford this! You need \`$${itemData.price.toLocaleString()}\`, but your wallet balance is only \`$${userWallet.toLocaleString()}\`.`
+        await interaction.deferReply({ ephemeral: true });
+
+        // Atomic: fails if the wallet cannot cover the price.
+        const { ok, balance } = await store.spend(userId, item.price);
+        if (!ok) {
+            return interaction.editReply({
+                content: `❌ You cannot afford **${item.name}**. Price ${money(item.price)}, your wallet has ${money(balance)}.`,
             });
         }
 
-        // Deduci i soldi ed aggiungi l'oggetto all'inventario
-        userProfile.wallet -= itemData.price;
-        if (!userProfile.inventory) userProfile.inventory = {};
-        userProfile.inventory[selectedItemKey] = (userProfile.inventory[selectedItemKey] || 0) + 1;
+        // Only grant the item once the money is safely deducted.
+        await store.addItem(userId, selectedKey, 1);
 
-        saveEconomyData(economyData);
+        const owned = Number(store.getInventory(userId)[selectedKey]) || 0;
 
         const embed = new EmbedBuilder()
-            .setColor(0x00FF00)
+            .setColor(0x00ff00)
             .setTitle('🛍️ Purchase Successful!')
-            .setDescription(`You have successfully bought **${itemData.name}** for \`$${itemData.price.toLocaleString()}\`!`)
+            .setDescription(`You bought **${item.name}** for ${money(item.price)}.`)
             .addFields(
-                { name: 'Item Added', value: `\`x1 ${itemData.name}\``, inline: true },
-                { name: 'Remaining Wallet', value: `\`$${userProfile.wallet.toLocaleString()}\``, inline: true }
+                { name: 'Owned', value: `x${owned}`, inline: true },
+                { name: 'Remaining wallet', value: money(balance), inline: true },
             )
-            .setFooter({ text: 'Check your /inventory to see your new item in action!' })
+            .setFooter({ text: 'Check /inventory to see your items.' })
             .setTimestamp();
 
-        await interaction.editReply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     },
 };

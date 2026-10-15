@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const perms = require('../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -20,11 +21,14 @@ module.exports = {
                     option.setName('target_role')
                         .setDescription('Select the target role')
                         .setRequired(true)))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+        .setDMPermission(false),
 
     category: 'Utility',
 
     async execute(interaction) {
+
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ManageMessages))) return;
         try {
             const subcommand = interaction.options.getSubcommand();
 

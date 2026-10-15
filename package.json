@@ -1,19 +1,53 @@
 {
   "name": "the-syndicate",
-  "version": "1.0.0",
-  "description": "A natural, realistic, and simple Discord bot named The Syndicate",
+  "version": "2.1.0",
+  "description": "The Syndicate \u2014 a Discord community bot with economy, moderation, verification, giveaways, native polls and YouTube music. Every ID is configurable via .env; all writes are atomic; permission gates are enforced at registration AND at dispatch.",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "check": "node scripts/validate.js",
+    "test": "node scripts/test.js",
+    "gate": "npm run lint && npm run check && npm run audit && npm test",
+    "audit": "node scripts/audit.js"
   },
   "dependencies": {
-    "@discordjs/voice": "^0.17.0",
-    "discord.js": "^14.14.0",
+    "@discordjs/voice": "^0.18.0",
+    "@noble/ciphers": "^1.3.0",
+    "axios": "^1.7.7",
+    "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
-    "translate-google-api": "^1.0.4"
+    "ffmpeg-static": "^5.3.0",
+    "node-cron": "^3.0.3",
+    "opusscript": "^0.1.1",
+    "play-dl": "^1.9.7"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "private": true
+  "private": true,
+  "license": "MIT",
+  "optionalDependencies": {
+    "@discordjs/opus": "^0.10.0"
+  },
+  "keywords": [
+    "discord",
+    "discord.js",
+    "bot",
+    "moderation",
+    "economy",
+    "music",
+    "giveaway",
+    "verification"
+  ],
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ]
 }

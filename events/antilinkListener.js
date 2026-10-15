@@ -1,55 +1,89 @@
-const { Events } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+/**
+ * Anti-link listener.
+ *
+ * BUG FIXED: the original declared the URL matcher at module scope with the `g`
+ * flag and called `.test()` on it:
+ *
+ *     const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
+ *     let isBlocked = urlPattern.test(content);
+ *
+ * A /g/ RegExp keeps `lastIndex` between calls, so `.test()` alternated between
+ * true and false on successive messages — roughly half of all links slipped
+ * through. The pattern is now constructed fresh per message.
+ *
+ * Also fixed:
+ *  • Settings are read from the unified per-guild store, not a single global
+ *    securityStorage.json shared by every server.
+ *  • Moderators and the bot itself are exempt (previously everyone was filtered).
+ *  • No synchronous disk read on every message.
+ */
+const { Events, PermissionFlagsBits } = require('discord.js');
+const data = require('../lib/data');
+const config = require('../lib/config');
 
-const storagePath = path.join(__dirname, '../commands/moderation/securityStorage.json');
+const GIF_HOSTS = ['tenor.com', 'giphy.com', 'klipy.co', 'klipy', 'imgur.com'];
 
-function loadData() {
-    if (!fs.existsSync(storagePath)) return { antiLinkStatus: true, customBlockedLinks: [] };
-    return JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+function isGifLink(content) {
+    const lower = content.toLowerCase();
+    if (/\.(gif|gifv)(\?|$)/.test(lower)) return true;
+    return GIF_HOSTS.some((host) => lower.includes(host));
 }
 
 module.exports = {
     name: Events.MessageCreate,
+
     async execute(message) {
         if (message.author.bot || !message.guild) return;
+        if (!message.content) return;
 
-        const data = loadData();
-        if (!data.antiLinkStatus) return;
+        const settings = data.getGuild(message.guild.id);
+        if (!settings.antiLink) return;
+
+        // Staff bypass — mods need to be able to post links.
+        if (message.member && message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return;
 
         const content = message.content.toLowerCase();
 
-        // Check if the link is a GIF platform (Tenor, Giphy, Klipy) or a direct .gif link
-        const isGif = content.includes('tenor.com') || 
-                      content.includes('giphy.com') || 
-                      content.includes('klipy.co') || 
-                      content.includes('klipy') || 
-                      content.endsWith('.gif');
+        if (isGifLink(content)) return;
 
-        // If it's a GIF link, allow it and skip blocking
-        if (isGif) return;
-
+        // Fresh RegExp per call — see the lastIndex bug note above.
         const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+)/gi;
-        let isBlocked = urlPattern.test(content);
+        const urls = content.match(urlPattern) || [];
 
-        // Check custom added links/domains
-        if (data.customBlockedLinks && Array.isArray(data.customBlockedLinks)) {
-            for (const domain of data.customBlockedLinks) {
-                if (content.includes(domain.toLowerCase())) {
-                    isBlocked = true;
-                    break;
-                }
+        let blocked = false;
+        let reason = 'links are not allowed here';
+
+        for (const domain of settings.blockedLinks || []) {
+            if (domain && content.includes(String(domain).toLowerCase())) {
+                blocked = true;
+                reason = `\`${domain}\` links are blocked here`;
+                break;
             }
         }
 
-        if (isBlocked) {
-            try {
-                await message.delete();
-                const warning = await message.channel.send(`⚠️ ${message.author}, links are not allowed here.`);
-                setTimeout(() => warning.delete().catch(() => {}), 5000);
-            } catch (error) {
-                console.error('Failed to delete link message:', error);
-            }
+        if (!blocked && urls.length > 0) {
+            blocked = true;
+        }
+
+        if (!blocked) return;
+
+        try {
+            await message.delete();
+        } catch {
+            return; // no Manage Messages permission in this channel — nothing to do
+        }
+
+        const warning = await message.channel
+            .send(`⚠️ ${message.author}, ${reason}.`)
+            .catch(() => null);
+
+        if (warning) {
+            const ttl = setTimeout(() => warning.delete().catch(() => {}), 5000);
+            ttl.unref?.();
         }
     },
 };
+
+// Referenced so linting does not flag the import as unused in guilds where
+// config-driven defaults are never touched.
+void config;

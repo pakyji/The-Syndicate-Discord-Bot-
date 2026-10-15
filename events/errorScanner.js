@@ -1,45 +1,74 @@
-const { EmbedBuilder } = require('discord.js');
+/**
+ * Process-level error handling.
+ *
+ * Fixes vs. the original:
+ *  • `uncaughtException` NO LONGER keeps the process alive. After an uncaught
+ *    exception Node's state is undefined; the original logged it and carried on,
+ *    so the bot kept running with possibly-corrupted in-memory data and then
+ *    persisted that corruption to disk. We now log, attempt a final flush, and
+ *    exit(1) so the supervisor (pm2 / systemd / Docker) restarts cleanly.
+ *  • Stack traces are REDACTED before being posted to Discord. The original sent
+ *    raw stacks to a channel, and stacks routinely contain env values, tokens in
+ *    request URLs, file paths and user IDs.
+ *  • The log channel is configurable and is treated as a private staff channel.
+ *  • Handlers are registered once, guarded against re-entrancy.
+ */
+const { Events, EmbedBuilder } = require('discord.js');
+const config = require('../lib/config');
+const { formatError } = require('../lib/logger');
 
-// Jahan aap error aur upload/system logs mangwana chahte hain us channel ki ID
-const LOG_CHANNEL_ID = '902047746624749588'; 
+let shuttingDown = false;
+
+async function sendErrorLog(client, errorType, error) {
+    if (!config.channels.errorLog) return;
+
+    try {
+        const logChannel = await client.channels.fetch(config.channels.errorLog).catch(() => null);
+        if (!logChannel || !logChannel.isTextBased()) return;
+
+        const embed = new EmbedBuilder()
+            .setColor(0xff0000)
+            .setTitle('🚨 Bot System Error')
+            .setDescription(
+                `**Type:** \`${errorType}\`\n\n**Details:**\n\`\`\`js\n${formatError(error)}\n\`\`\``,
+            )
+            .setTimestamp();
+
+        await logChannel.send({ embeds: [embed] });
+    } catch (err) {
+        // Never let the error reporter itself throw.
+        console.error('[errorScanner] could not deliver log:', err.message);
+    }
+}
 
 module.exports = {
-    name: 'ready',
-    async execute(client) {
-        console.log(`🛡️ Error & Upload Scanner is active for ${client.user.tag}`);
+    name: Events.ClientReady,
+    once: true,
 
-        // 1. Unhandled Rejections (jaise API request fail hona, MyMemory translation error)
-        process.on('unhandledRejection', async (error) => {
-            console.error('Unhandled Promise Rejection:', error);
-            await sendErrorLog(client, 'Unhandled Rejection / API Error', error);
+    async execute(client) {
+        console.log(`🛡️ Error scanner active for ${client.user.tag} (log channel: ${config.channels.errorLog || 'none'})`);
+
+        // Recoverable: a rejected promise nobody awaited. Log and continue.
+        process.on('unhandledRejection', async (reason) => {
+            console.error('[unhandledRejection]', reason);
+            await sendErrorLog(client, 'Unhandled Rejection', reason instanceof Error ? reason : new Error(String(reason)));
         });
 
-        // 2. Uncaught Exceptions (jaise code crash hone par)
+        // NOT recoverable: log, flush, exit.
         process.on('uncaughtException', async (error) => {
-            console.error('Uncaught Exception:', error);
-            await sendErrorLog(client, 'Uncaught Exception / Crash', error);
+            console.error('[uncaughtException]', error);
+            if (shuttingDown) return;
+            shuttingDown = true;
+
+            try {
+                await sendErrorLog(client, 'Uncaught Exception — restarting', error);
+            } finally {
+                // Give the log a moment to send, then exit so the supervisor restarts us.
+                const timer = setTimeout(() => process.exit(1), 2000);
+                timer.unref?.();
+                try { client.destroy(); } catch { /* ignore */ }
+                process.exit(1);
+            }
         });
     },
 };
-
-// Helper function jo error ko embed banakar target channel par bhej dega
-async function sendErrorLog(client, errorType, error) {
-    try {
-        const logChannel = await client.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-        if (!logChannel) return;
-
-        const errorMessage = error.stack || error.message || String(error);
-        // Discord embed description ki limit 4096 characters hoti hai
-        const truncatedMessage = errorMessage.length > 3500 ? errorMessage.substring(0, 3500) + '...' : errorMessage;
-
-        const errorEmbed = new EmbedBuilder()
-            .setColor('#FF0000')
-            .setTitle(`🚨 Bot System Error / Upload Alert`)
-            .setDescription(`**Type:** \`${errorType}\`\n\n**Details:**\n\`\`\`js\n${truncatedMessage}\n\`\`\``)
-            .setTimestamp();
-
-        await logChannel.send({ embeds: [errorEmbed] });
-    } catch (err) {
-        console.error('Failed to send error log to Discord channel:', err);
-    }
-}

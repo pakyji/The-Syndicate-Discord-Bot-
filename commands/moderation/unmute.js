@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('discord.js');
+const perms = require('../../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -12,11 +13,17 @@ module.exports = {
             option.setName('reason')
                 .setDescription('Reason for unmuting')
                 .setRequired(false))
-        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+        .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+        .setDMPermission(false),
 
     category: 'Moderation',
 
     async execute(interaction) {
+
+        if (!(await perms.requirePermission(interaction, PermissionFlagsBits.ModerateMembers))) return;
+
+
+        // Role-hierarchy check: never let a mod act on an equal/higher-ranking member.
         try {
             const targetUser = interaction.options.getMember('target');
             const reason = interaction.options.getString('reason') || 'No reason provided';
