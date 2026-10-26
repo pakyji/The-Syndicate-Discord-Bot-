@@ -313,46 +313,6 @@ which is the fastest way to get a bot kicked from a server.
 
 ---
 
-## Publishing on GitHub
-
-The repository's *About* (description, website, topics) is stored on GitHub, not in the
-repo, so it is set separately from the README. Either way takes one minute.
-
-**In the web UI:** repository → ⚙️ next to *About* (top-right) →
-
-| Field | Value |
-|---|---|
-| Description | `The Syndicate — a Discord community bot: moderation, verification, economy, giveaways, native polls and YouTube music. Every ID configurable via .env, atomic persistence, permission gates enforced at registration and at dispatch.` |
-| Website | *(leave blank, or your support server invite)* |
-| Topics | `discord` `discord-bot` `discord-js` `moderation` `economy` `music` `giveaway` `verification` `javascript` `nodejs` |
-| Include in the home page | ✅ Releases ✅ Packages *(your choice)* |
-
-**With the API** (needs a token with `repo` scope):
-
-```bash
-curl -X PATCH https://api.github.com/repos/<OWNER>/<REPO> \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  -d '{
-    "description": "The Syndicate — a Discord community bot: moderation, verification, economy, giveaways, native polls and YouTube music.",
-    "homepage": "",
-    "has_issues": true,
-    "has_projects": false,
-    "has_wiki": false
-  }'
-```
-
-Topics are a separate endpoint:
-
-```bash
-curl -X PUT https://api.github.com/repos/<OWNER>/<REPO>/topics \
-  -H "Authorization: Bearer $GITHUB_TOKEN" \
-  -H "Accept: application/vnd.github.mercy-preview+json" \
-  -d '{"names":["discord","discord-bot","discord-js","moderation","economy","music","giveaway","verification","javascript","nodejs"]}'
-```
-
----
-
 ## Operations
 
 ```bash
