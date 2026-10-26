@@ -80,7 +80,8 @@ whereas global commands can take up to an hour to appear.
 | `/clearwarn` | Moderate Members | Remove one or all warnings |
 | `/clear` | Manage Messages | Bulk delete 1–100 messages, optional user filter |
 | `/say` | Manage Messages | Make the bot speak (mentions escaped by default) |
-| `/poll` | Manage Messages | Native Discord poll |
+| `/suggestion` | Utility | Submit a suggestion with upvote/downvote buttons |
+| `/uptime` | Info | Show bot uptime, memory usage, and guild stats |
 | `/id` | Manage Messages | Look up a channel or role ID |
 
 ### Protection
