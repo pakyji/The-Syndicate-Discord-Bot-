@@ -840,8 +840,10 @@ if (fs.existsSync(LIVE_STORE)) {
   // mock for the duration of this section and restore them afterwards.
   const savedGuildId = cfg.guildId;
   const savedChannelId = cfg.announce.channelId;
+  const savedPingEveryone = cfg.announce.pingEveryone;
   cfg.guildId = GUILD_ID;
   cfg.announce.channelId = CH_ID;
+  cfg.announce.pingEveryone = true;  // Enable ping for this test section
 
   let client = mockClient();
   let outcome = await verLib.announceIfUpdated(client);
@@ -929,6 +931,7 @@ if (fs.existsSync(LIVE_STORE)) {
   await data.updateSyndicate((s) => ({ ...s, version: { lastAnnounced: null, history: [] } }));
   cfg.guildId = savedGuildId;
   cfg.announce.channelId = savedChannelId;
+  cfg.announce.pingEveryone = savedPingEveryone;
 
   console.log(`\n${'='.repeat(46)}\n  ${pass} passed, ${fail} failed\n${'='.repeat(46)}\n`);
   process.exit(fail?1:0);
