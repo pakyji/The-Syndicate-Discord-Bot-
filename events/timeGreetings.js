@@ -110,7 +110,7 @@ module.exports = {
             });
         }
 
-        const tz = config.verifiedPing.timezone;
+        const tz = config.botTimezone || 'Europe/Rome';
         const en = config.channels.greetingEnglish;
         const it = config.channels.greetingItalian;
 
