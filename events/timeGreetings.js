@@ -1,6 +1,6 @@
 /**
- * Scheduled afternoon greetings (EN + IT).
- * Morning and night greetings removed per request.
+ * Time greetings disabled.
+ * All scheduled greetings removed per request.
  *
  * Fixes vs. the original:
  *  • Channel IDs came from config instead of two hardcoded constants.
@@ -115,26 +115,12 @@ module.exports = {
         const en = config.channels.greetingEnglish;
         const it = config.channels.greetingItalian;
 
-        const schedule = (expression, label, fn) => {
-            try {
-                const task = cron.schedule(expression, fn, { timezone: tz });
-                jobs.push(task);
-                console.log(`[greetings] scheduled ${label} (${expression}, ${tz})`);
-            } catch (error) {
-                console.error(`[greetings] invalid cron expression for ${label}:`, error.message);
-            }
-        };
-
-        schedule('0 14 * * *', 'afternoon', () => {
-            sendGreeting(en, '☀️ Good Afternoon!', EN.afternoonGreetings, EN.afternoonActions, EN.emojis, '#FF8C00');
-            sendGreeting(it, '☀️ Buon Pomeriggio!', IT.afternoonGreetings, IT.afternoonActions, IT.emojis, '#FF8C00');
-        });
+        // All greetings disabled
+        console.log('🕒 Time greetings disabled.');
 
         const stopAll = () => { for (const job of jobs) { try { job.stop(); } catch { /* ignore */ } } };
         process.on('SIGTERM', stopAll);
         process.on('SIGINT', stopAll);
         client.once('shardDisconnect', stopAll);
-
-        console.log('🕒 Multilingual time greetings are active (afternoon only).');
     },
 };
