@@ -5,8 +5,7 @@
  * The suggestion is posted to a configurable channel and reacts are counted
  * automatically via the pollReactions event (or a simple counter).
  */
-const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const store = require('../lib/data');
+const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const config = require('../lib/config');
 const perms = require('../lib/perms');
 
