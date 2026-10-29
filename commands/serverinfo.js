@@ -2,7 +2,6 @@
  * /serverinfo — display rich information about a Discord server.
  */
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const perms = require('../lib/perms');
 
 module.exports = {
     data: new SlashCommandBuilder()
