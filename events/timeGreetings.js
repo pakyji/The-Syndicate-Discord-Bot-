@@ -1,5 +1,6 @@
 /**
- * Scheduled good-morning / afternoon / night greetings (EN + IT).
+ * Scheduled afternoon greetings (EN + IT).
+ * Morning and night greetings removed per request.
  *
  * Fixes vs. the original:
  *  • Channel IDs came from config instead of two hardcoded constants.
@@ -124,19 +125,9 @@ module.exports = {
             }
         };
 
-        schedule('0 8 * * *', 'morning', () => {
-            sendGreeting(en, '🌅 Good Morning!', EN.morningGreetings, EN.morningActions, EN.emojis, '#FFD700');
-            sendGreeting(it, '🌅 Buongiorno!', IT.morningGreetings, IT.morningActions, IT.emojis, '#FFD700');
-        });
-
         schedule('0 14 * * *', 'afternoon', () => {
             sendGreeting(en, '☀️ Good Afternoon!', EN.afternoonGreetings, EN.afternoonActions, EN.emojis, '#FF8C00');
             sendGreeting(it, '☀️ Buon Pomeriggio!', IT.afternoonGreetings, IT.afternoonActions, IT.emojis, '#FF8C00');
-        });
-
-        schedule('0 0 * * *', 'night', () => {
-            sendGreeting(en, '🌙 Good Night!', EN.nightGreetings, EN.nightActions, EN.emojis, '#4B0082');
-            sendGreeting(it, '🌙 Buonanotte!', IT.nightGreetings, IT.nightActions, IT.emojis, '#4B0082');
         });
 
         const stopAll = () => { for (const job of jobs) { try { job.stop(); } catch { /* ignore */ } } };
@@ -144,6 +135,6 @@ module.exports = {
         process.on('SIGINT', stopAll);
         client.once('shardDisconnect', stopAll);
 
-        console.log('🕒 Multilingual time greetings are active.');
+        console.log('🕒 Multilingual time greetings are active (afternoon only).');
     },
 };
